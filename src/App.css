@@ -1130,3 +1130,169 @@ button {
 .viewer-backdrop:focus {
   outline: none;
 }
+
+
+.header-source-button {
+  white-space: nowrap;
+}
+
+.source-manager-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 35;
+  background: rgba(5, 7, 9, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.source-manager {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(880px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  background: #101319;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+}
+
+.source-manager-header,
+.source-manager-footer,
+.source-manager-main,
+.source-manager-actions {
+  display: flex;
+  align-items: center;
+}
+
+.source-manager-header {
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.source-manager-header h2 {
+  margin: 2px 0 0;
+  font-size: 24px;
+  letter-spacing: -0.035em;
+}
+
+.source-manager-header .eyebrow {
+  margin: 0;
+}
+
+.source-manager-list {
+  min-height: 0;
+  overflow: auto;
+}
+
+.source-manager-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.35fr) minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.source-manager-main {
+  min-width: 0;
+  gap: 10px;
+}
+
+.source-manager-main > div,
+.source-manager-status {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.source-manager-main strong,
+.source-manager-main span,
+.source-manager-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-manager-main strong {
+  font-size: 13px;
+}
+
+.source-manager-main div > span,
+.source-manager-status span {
+  color: var(--soft);
+  font-size: 10px;
+}
+
+.source-manager-status strong {
+  color: #dfe3e8;
+  font-size: 11px;
+}
+
+.source-manager-actions {
+  gap: 7px;
+}
+
+.source-manager-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.source-manager-actions button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.source-manager-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.source-manager-actions .danger-button:hover:not(:disabled) {
+  color: #ffd0d0;
+  border-color: rgba(255, 125, 125, 0.35);
+  background: rgba(255, 125, 125, 0.08);
+}
+
+.source-manager-footer {
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.source-manager-footer > span {
+  max-width: 570px;
+  color: var(--soft);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .source-manager-backdrop {
+    padding: 10px;
+  }
+
+  .source-manager-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .source-manager-actions {
+    justify-content: flex-end;
+  }
+
+  .source-manager-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
