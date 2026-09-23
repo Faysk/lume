@@ -14,6 +14,7 @@ use std::{
 
 use models::{MediaPage, MediaQuery, ScanProgress, Source};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::db::AppState;
 
@@ -156,6 +157,14 @@ fn query_media(
 }
 
 #[tauri::command]
+fn get_media_item(
+    media_id: i64,
+    state: State<'_, AppState>,
+) -> Result<models::MediaItem, String> {
+    db::get_media_item(&state.db_path, media_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_extensions(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     db::list_extensions(&state.db_path).map_err(|error| error.to_string())
 }
@@ -171,6 +180,27 @@ async fn ensure_thumbnail(
         .await
         .map_err(|error| format!("thumbnail task failed: {error}"))?
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_media_external(
+    media_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let media = db::media_path(&state.db_path, media_id).map_err(|error| error.to_string())?;
+    let root = fs::canonicalize(&media.root_path)
+        .map_err(|_| "A fonte desta mídia está offline ou indisponível.".to_string())?;
+    let full = fs::canonicalize(root.join(&media.relative_path))
+        .map_err(|_| "O arquivo original não está disponível.".to_string())?;
+
+    if !full.starts_with(&root) {
+        return Err("O caminho da mídia saiu da fonte cadastrada.".into());
+    }
+
+    app.opener()
+        .open_path(&full, None::<&str>)
+        .map_err(|error| format!("Não foi possível abrir no aplicativo padrão: {error}"))
 }
 
 #[tauri::command]
@@ -200,6 +230,7 @@ fn media_asset_path(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
             let cache_dir = app.path().app_cache_dir()?;
@@ -229,8 +260,10 @@ pub fn run() {
             cancel_scan,
             remove_source,
             query_media,
+            get_media_item,
             list_extensions,
             ensure_thumbnail,
+            open_media_external,
             media_asset_path
         ])
         .run(tauri::generate_context!())
