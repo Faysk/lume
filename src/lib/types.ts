@@ -37,6 +37,7 @@ export interface ScanProgress {
   supported: number;
   errors: number;
   done: boolean;
+  cancelled: boolean;
   message: string | null;
 }
 
