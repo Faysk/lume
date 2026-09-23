@@ -92,6 +92,8 @@ function App() {
   const [minCardWidth, setMinCardWidth] = useState(188);
 
   const thumbnailAttempts = useRef(new Set<number>());
+  const thumbnailQueue = useRef<MediaItem[]>([]);
+  const thumbnailWorkers = useRef(0);
   const refreshTimer = useRef<number | undefined>(undefined);
   const requestVersion = useRef(0);
   const loadingMoreRef = useRef(false);
@@ -324,21 +326,56 @@ function App() {
     [loadSourcesAndExtensions, refreshMedia],
   );
 
-  const handleNeedThumbnail = useCallback(async (item: MediaItem) => {
-    if (thumbnailAttempts.current.has(item.id)) return;
-    thumbnailAttempts.current.add(item.id);
+  const pumpThumbnailQueue = useCallback(() => {
+    const runNext = () => {
+      const nextItem = thumbnailQueue.current.shift();
 
-    try {
-      const url = await thumbnailUrl(item.id);
-      setThumbnails((current) => {
-        const next = new Map(current);
-        next.set(item.id, url);
-        return next;
-      });
-    } catch {
-      // O placeholder local continua visível se a mídia não decodificar.
+      if (!nextItem) {
+        thumbnailWorkers.current = Math.max(0, thumbnailWorkers.current - 1);
+        return;
+      }
+
+      void thumbnailUrl(nextItem.id)
+        .then((url) => {
+          setThumbnails((current) => {
+            const next = new Map(current);
+            next.set(nextItem.id, url);
+            return next;
+          });
+        })
+        .catch(() => {
+          // O placeholder local continua visível se a mídia não decodificar.
+        })
+        .finally(runNext);
+    };
+
+    while (
+      thumbnailWorkers.current < 4 &&
+      thumbnailQueue.current.length > 0
+    ) {
+      thumbnailWorkers.current += 1;
+      runNext();
     }
   }, []);
+
+  const handleNeedThumbnail = useCallback(
+    (item: MediaItem) => {
+      if (thumbnailAttempts.current.has(item.id)) return;
+      thumbnailAttempts.current.add(item.id);
+
+      // O item mais recentemente visível ganha prioridade. A fila pendente fica
+      // curta para que um scroll rápido não obrigue o Lume a processar tudo que passou.
+      thumbnailQueue.current.unshift(item);
+
+      while (thumbnailQueue.current.length > 32) {
+        const dropped = thumbnailQueue.current.pop();
+        if (dropped) thumbnailAttempts.current.delete(dropped.id);
+      }
+
+      pumpThumbnailQueue();
+    },
+    [pumpThumbnailQueue],
+  );
 
   const loadMorePage = useCallback(async (): Promise<MediaItem[]> => {
     if (loadingMoreRef.current || items.length >= total) return [];
