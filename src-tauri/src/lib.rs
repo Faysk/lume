@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
 };
 
-use models::{MediaPage, ScanProgress, Source};
+use models::{MediaPage, MediaQuery, ScanProgress, Source};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::AppState;
@@ -103,11 +103,15 @@ fn start_scan(
 
 #[tauri::command]
 fn query_media(
-    offset: u32,
-    limit: u32,
+    query: MediaQuery,
     state: State<'_, AppState>,
 ) -> Result<MediaPage, String> {
-    db::query_media(&state.db_path, offset, limit).map_err(|error| error.to_string())
+    db::query_media_filtered(&state.db_path, &query).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_extensions(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    db::list_extensions(&state.db_path).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -176,6 +180,7 @@ pub fn run() {
             add_source,
             start_scan,
             query_media,
+            list_extensions,
             ensure_thumbnail,
             media_asset_path
         ])

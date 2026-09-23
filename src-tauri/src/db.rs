@@ -4,9 +4,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, types::Value, Connection};
 
-use crate::models::{MediaItem, MediaPage, Source};
+use crate::models::{MediaItem, MediaPage, MediaQuery, Source};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -254,12 +254,139 @@ pub fn upsert_media_batch(
     Ok(())
 }
 
-pub fn query_media(db_path: &Path, offset: u32, limit: u32) -> Result<MediaPage> {
-    let limit = limit.clamp(1, 500);
+pub fn list_extensions(db_path: &Path) -> Result<Vec<String>> {
     let connection = open(db_path)?;
-    let total: i64 = connection.query_row("SELECT COUNT(*) FROM media", [], |row| row.get(0))?;
-
     let mut statement = connection.prepare(
+        "SELECT DISTINCT extension FROM media ORDER BY extension COLLATE NOCASE ASC",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to read media extensions")
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+fn build_media_filter(query: &MediaQuery) -> (String, Vec<Value>) {
+    let mut clauses = Vec::new();
+    let mut values = Vec::new();
+
+    if let Some(search) = query.search.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        clauses.push("m.file_name LIKE ? ESCAPE '\\' COLLATE NOCASE".to_string());
+        values.push(Value::Text(format!("%{}%", escape_like(search))));
+    }
+
+    if let Some(media_type) = query
+        .media_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| matches!(*value, "image" | "video"))
+    {
+        clauses.push("m.media_type = ?".to_string());
+        values.push(Value::Text(media_type.to_string()));
+    }
+
+    let extensions = query
+        .extensions
+        .iter()
+        .map(|value| value.trim().trim_start_matches('.').to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+
+    if !extensions.is_empty() {
+        clauses.push(format!(
+            "m.extension IN ({})",
+            std::iter::repeat("?")
+                .take(extensions.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        values.extend(extensions.into_iter().map(Value::Text));
+    }
+
+    if !query.source_ids.is_empty() {
+        clauses.push(format!(
+            "m.source_id IN ({})",
+            std::iter::repeat("?")
+                .take(query.source_ids.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        values.extend(query.source_ids.iter().copied().map(Value::Integer));
+    }
+
+    if let Some(value) = query.modified_from {
+        clauses.push("COALESCE(m.modified_at_fs, m.created_at_fs, 0) >= ?".to_string());
+        values.push(Value::Integer(value));
+    }
+
+    if let Some(value) = query.modified_to {
+        clauses.push("COALESCE(m.modified_at_fs, m.created_at_fs, 0) <= ?".to_string());
+        values.push(Value::Integer(value));
+    }
+
+    if let Some(value) = query.min_size_bytes.filter(|value| *value >= 0) {
+        clauses.push("m.size_bytes >= ?".to_string());
+        values.push(Value::Integer(value));
+    }
+
+    if let Some(value) = query.max_size_bytes.filter(|value| *value >= 0) {
+        clauses.push("m.size_bytes <= ?".to_string());
+        values.push(Value::Integer(value));
+    }
+
+    let sql = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+
+    (sql, values)
+}
+
+fn media_order_by(sort: Option<&str>) -> &'static str {
+    match sort {
+        Some("date_desc") => "COALESCE(m.modified_at_fs, m.created_at_fs, 0) DESC, m.id DESC",
+        Some("date_asc") => "COALESCE(m.modified_at_fs, m.created_at_fs, 0) ASC, m.id ASC",
+        Some("name_asc") => "m.file_name COLLATE NOCASE ASC, m.id ASC",
+        Some("name_desc") => "m.file_name COLLATE NOCASE DESC, m.id DESC",
+        Some("size_asc") => "m.size_bytes ASC, m.id ASC",
+        Some("size_desc") => "m.size_bytes DESC, m.id DESC",
+        _ => "m.id ASC",
+    }
+}
+
+pub fn query_media(db_path: &Path, offset: u32, limit: u32) -> Result<MediaPage> {
+    query_media_filtered(
+        db_path,
+        &MediaQuery {
+            offset,
+            limit,
+            ..MediaQuery::default()
+        },
+    )
+}
+
+pub fn query_media_filtered(db_path: &Path, query: &MediaQuery) -> Result<MediaPage> {
+    let limit = query.limit.clamp(1, 500);
+    let (filter_sql, filter_values) = build_media_filter(query);
+    let connection = open(db_path)?;
+
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM media m JOIN sources s ON s.id = m.source_id{}",
+        filter_sql
+    );
+    let total: i64 = connection.query_row(
+        &count_sql,
+        params_from_iter(filter_values.iter()),
+        |row| row.get(0),
+    )?;
+
+    let select_sql = format!(
         "
         SELECT
             m.id, m.source_id, m.relative_path, m.file_name, m.extension,
@@ -268,12 +395,19 @@ pub fn query_media(db_path: &Path, offset: u32, limit: u32) -> Result<MediaPage>
             s.display_name, s.root_path
         FROM media m
         JOIN sources s ON s.id = m.source_id
-        ORDER BY m.id ASC
-        LIMIT ?1 OFFSET ?2
+        {filter_sql}
+        ORDER BY {order_by}
+        LIMIT ? OFFSET ?
         ",
-    )?;
+        order_by = media_order_by(query.sort.as_deref()),
+    );
 
-    let rows = statement.query_map(params![i64::from(limit), i64::from(offset)], |row| {
+    let mut values = filter_values;
+    values.push(Value::Integer(i64::from(limit)));
+    values.push(Value::Integer(i64::from(query.offset)));
+
+    let mut statement = connection.prepare(&select_sql)?;
+    let rows = statement.query_map(params_from_iter(values.iter()), |row| {
         Ok(MediaItem {
             id: row.get(0)?,
             source_id: row.get(1)?,
@@ -299,7 +433,7 @@ pub fn query_media(db_path: &Path, offset: u32, limit: u32) -> Result<MediaPage>
     Ok(MediaPage {
         items,
         total,
-        offset,
+        offset: query.offset,
         limit,
     })
 }
@@ -461,6 +595,118 @@ mod tests {
 
         fs::remove_dir_all(root).expect("temporary catalog should be removable");
     }
+
+
+    #[test]
+    fn filtered_query_combines_search_type_extension_source_and_sort() {
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).expect("migration should succeed");
+
+        let source_a = insert_or_get_source(&db_path, r"C:\A", "A").unwrap();
+        let source_b = insert_or_get_source(&db_path, r"D:\B", "B").unwrap();
+
+        upsert_media_batch(
+            &db_path,
+            source_a.id,
+            &[
+                DiscoveredMedia {
+                    relative_path: "Sunset.JPG".into(),
+                    file_name: "Sunset.JPG".into(),
+                    extension: "jpg".into(),
+                    media_type: "image".into(),
+                    size_bytes: 50,
+                    created_at_fs: Some(10),
+                    modified_at_fs: Some(20),
+                },
+                DiscoveredMedia {
+                    relative_path: "sunset.mp4".into(),
+                    file_name: "sunset.mp4".into(),
+                    extension: "mp4".into(),
+                    media_type: "video".into(),
+                    size_bytes: 500,
+                    created_at_fs: Some(11),
+                    modified_at_fs: Some(21),
+                },
+            ],
+        ).unwrap();
+
+        upsert_media_batch(
+            &db_path,
+            source_b.id,
+            &[DiscoveredMedia {
+                relative_path: "Sunset-Elsewhere.jpg".into(),
+                file_name: "Sunset-Elsewhere.jpg".into(),
+                extension: "jpg".into(),
+                media_type: "image".into(),
+                size_bytes: 700,
+                created_at_fs: Some(12),
+                modified_at_fs: Some(22),
+            }],
+        ).unwrap();
+
+        let page = query_media_filtered(
+            &db_path,
+            &MediaQuery {
+                offset: 0,
+                limit: 50,
+                search: Some("sunset".into()),
+                media_type: Some("image".into()),
+                extensions: vec!["JPG".into()],
+                source_ids: vec![source_a.id],
+                min_size_bytes: Some(1),
+                max_size_bytes: Some(100),
+                sort: Some("name_desc".into()),
+                ..MediaQuery::default()
+            },
+        ).expect("filtered page should load");
+
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].file_name, "Sunset.JPG");
+
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
+    #[test]
+    fn filtered_query_keeps_sort_tie_breaker_deterministic() {
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).expect("migration should succeed");
+        let source = insert_or_get_source(&db_path, r"C:\Sort", "Sort").unwrap();
+
+        for index in 0..3 {
+            upsert_media_batch(
+                &db_path,
+                source.id,
+                &[DiscoveredMedia {
+                    relative_path: format!("folder-{index}/same.jpg"),
+                    file_name: "same.jpg".into(),
+                    extension: "jpg".into(),
+                    media_type: "image".into(),
+                    size_bytes: 100,
+                    created_at_fs: Some(10),
+                    modified_at_fs: Some(10),
+                }],
+            ).unwrap();
+        }
+
+        let page = query_media_filtered(
+            &db_path,
+            &MediaQuery {
+                offset: 0,
+                limit: 50,
+                sort: Some("name_asc".into()),
+                ..MediaQuery::default()
+            },
+        ).unwrap();
+
+        let ids = page.items.iter().map(|item| item.id).collect::<Vec<_>>();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted);
+
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
 
     #[test]
     #[ignore = "manual 100k catalog smoke fixture"]

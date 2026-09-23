@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +28,24 @@ pub struct MediaItem {
     pub thumbnail_state: String,
     pub source_name: String,
     pub source_root: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaQuery {
+    pub offset: u32,
+    pub limit: u32,
+    pub search: Option<String>,
+    pub media_type: Option<String>,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub source_ids: Vec<i64>,
+    pub modified_from: Option<i64>,
+    pub modified_to: Option<i64>,
+    pub min_size_bytes: Option<i64>,
+    pub max_size_bytes: Option<i64>,
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
