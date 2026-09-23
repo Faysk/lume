@@ -197,16 +197,17 @@ pub fn refresh_source_availability(db_path: &Path) -> Result<()> {
             continue;
         }
 
-        let desired = if Path::new(&root_path).is_dir() {
-            "online"
-        } else {
-            "offline"
-        };
+        let available = Path::new(&root_path).is_dir();
 
-        if desired != status {
+        if !available && status != "offline" {
             connection.execute(
-                "UPDATE sources SET status = ?2 WHERE id = ?1",
-                params![id, desired],
+                "UPDATE sources SET status = 'offline' WHERE id = ?1",
+                params![id],
+            )?;
+        } else if available && status == "offline" {
+            connection.execute(
+                "UPDATE sources SET status = 'online' WHERE id = ?1",
+                params![id],
             )?;
         }
     }
@@ -287,6 +288,15 @@ pub fn mark_scan_cancelled(db_path: &Path, source_id: i64) -> Result<()> {
     let connection = open(db_path)?;
     connection.execute(
         "UPDATE sources SET status = 'online' WHERE id = ?1",
+        params![source_id],
+    )?;
+    Ok(())
+}
+
+pub fn mark_scan_partial(db_path: &Path, source_id: i64) -> Result<()> {
+    let connection = open(db_path)?;
+    connection.execute(
+        "UPDATE sources SET status = 'error' WHERE id = ?1",
         params![source_id],
     )?;
     Ok(())
