@@ -676,6 +676,15 @@ pub fn media_path(db_path: &Path, media_id: i64) -> Result<MediaPath> {
         .with_context(|| format!("media {media_id} not found"))
 }
 
+pub fn reset_thumbnail_states(db_path: &Path) -> Result<()> {
+    let connection = open(db_path)?;
+    connection.execute(
+        "UPDATE media SET thumbnail_state = 'pending' WHERE thumbnail_state <> 'pending'",
+        [],
+    )?;
+    Ok(())
+}
+
 pub fn mark_thumbnail_ready(
     db_path: &Path,
     media_id: i64,
