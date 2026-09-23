@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import process from "node:process";
+// @ts-expect-error node types are intentionally not a frontend dependency\nimport process from "node:process";
 
 const host = process.env.TAURI_DEV_HOST;
 
