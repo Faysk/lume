@@ -79,6 +79,10 @@ export function clearThumbnailCache(): Promise<number> {
   return invoke<number>("clear_thumbnail_cache");
 }
 
+export function openLogsFolder(): Promise<void> {
+  return invoke<void>("open_logs_folder");
+}
+
 export async function thumbnailUrl(mediaId: number): Promise<string> {
   const path = await invoke<string>("ensure_thumbnail", { mediaId });
   return convertFileSrc(path);
