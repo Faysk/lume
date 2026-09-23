@@ -2,19 +2,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import "./App.css";
+import { LibraryToolbar } from "./components/LibraryToolbar";
 import { MediaGrid } from "./components/MediaGrid";
+import { MediaList } from "./components/MediaList";
 import { Viewer } from "./components/Viewer";
 import {
   addSource,
   chooseSourceDirectory,
+  listExtensions,
   listSources,
   queryMedia,
   startScan,
   thumbnailUrl,
 } from "./lib/api";
-import type { MediaItem, ScanProgress, Source } from "./lib/types";
+import type {
+  MediaItem,
+  MediaQuery,
+  MediaSort,
+  ScanProgress,
+  Source,
+} from "./lib/types";
 
 const PAGE_SIZE = 240;
+const MEGABYTE = 1024 * 1024;
 
 function sourceStatusLabel(source: Source): string {
   switch (source.status) {
@@ -29,45 +39,127 @@ function sourceStatusLabel(source: Source): string {
   }
 }
 
+function dateBoundary(value: string, endOfDay = false): number | null {
+  if (!value) return null;
+  const date = new Date(`${value}T${endOfDay ? "23:59:59" : "00:00:00"}`);
+  const unix = Math.floor(date.getTime() / 1000);
+  return Number.isFinite(unix) ? unix : null;
+}
+
+function megabytes(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.round(parsed * MEGABYTE);
+}
+
+function toggleValue<T>(current: T[], value: T): T[] {
+  return current.includes(value)
+    ? current.filter((item) => item !== value)
+    : [...current, value];
+}
+
 function App() {
   const [sources, setSources] = useState<Source[]>([]);
+  const [extensions, setExtensions] = useState<string[]>([]);
   const [items, setItems] = useState<MediaItem[]>([]);
   const [total, setTotal] = useState(0);
   const [thumbnails, setThumbnails] = useState<Map<number, string>>(new Map());
-  const [scanProgress, setScanProgress] = useState<Map<number, ScanProgress>>(new Map());
+  const [scanProgress, setScanProgress] = useState<Map<number, ScanProgress>>(
+    new Map(),
+  );
   const [selectedId, setSelectedId] = useState<number>();
   const [initializing, setInitializing] = useState(true);
   const [addingSource, setAddingSource] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
+
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [mediaType, setMediaType] = useState<"all" | "image" | "video">("all");
+  const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<number[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [minSizeMb, setMinSizeMb] = useState("");
+  const [maxSizeMb, setMaxSizeMb] = useState("");
+  const [sort, setSort] = useState<MediaSort>("date_desc");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [minCardWidth, setMinCardWidth] = useState(188);
+
   const thumbnailAttempts = useRef(new Set<number>());
   const refreshTimer = useRef<number | undefined>(undefined);
+  const requestVersion = useRef(0);
+  const loadingMoreRef = useRef(false);
 
-  const loadSources = useCallback(async () => {
-    const next = await listSources();
-    setSources(next);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 260);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  const baseQuery = useMemo<Omit<MediaQuery, "offset" | "limit">>(
+    () => ({
+      search: search || null,
+      mediaType: mediaType === "all" ? null : mediaType,
+      extensions: selectedExtensions,
+      sourceIds: selectedSourceIds,
+      modifiedFrom: dateBoundary(dateFrom),
+      modifiedTo: dateBoundary(dateTo, true),
+      minSizeBytes: megabytes(minSizeMb),
+      maxSizeBytes: megabytes(maxSizeMb),
+      sort,
+    }),
+    [
+      dateFrom,
+      dateTo,
+      maxSizeMb,
+      mediaType,
+      minSizeMb,
+      search,
+      selectedExtensions,
+      selectedSourceIds,
+      sort,
+    ],
+  );
+
+  const buildQuery = useCallback(
+    (offset: number, limit: number): MediaQuery => ({
+      offset,
+      limit,
+      ...baseQuery,
+    }),
+    [baseQuery],
+  );
+
+  const loadSourcesAndExtensions = useCallback(async () => {
+    const [nextSources, nextExtensions] = await Promise.all([
+      listSources(),
+      listExtensions(),
+    ]);
+    setSources(nextSources);
+    setExtensions(nextExtensions);
   }, []);
 
-  const refreshMedia = useCallback(async (requestedLimit?: number) => {
-    const limit = Math.max(PAGE_SIZE, requestedLimit ?? PAGE_SIZE);
-    const page = await queryMedia(0, limit);
-    setItems(page.items);
-    setTotal(page.total);
-  }, []);
+  const refreshMedia = useCallback(
+    async (requestedLimit?: number) => {
+      const version = ++requestVersion.current;
+      const limit = Math.max(PAGE_SIZE, requestedLimit ?? PAGE_SIZE);
+      const page = await queryMedia(buildQuery(0, limit));
+      if (version !== requestVersion.current) return;
+      setItems(page.items);
+      setTotal(page.total);
+    },
+    [buildQuery],
+  );
 
   useEffect(() => {
     let active = true;
 
-    Promise.all([listSources(), queryMedia(0, PAGE_SIZE)])
-      .then(([nextSources, page]) => {
-        if (!active) return;
-        setSources(nextSources);
-        setItems(page.items);
-        setTotal(page.total);
-      })
+    loadSourcesAndExtensions()
       .catch((reason: unknown) => {
-        if (!active) return;
-        setError(reason instanceof Error ? reason.message : String(reason));
+        if (active) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
       })
       .finally(() => {
         if (active) setInitializing(false);
@@ -76,7 +168,33 @@ function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadSourcesAndExtensions]);
+
+  useEffect(() => {
+    let active = true;
+    const version = ++requestVersion.current;
+
+    queryMedia(buildQuery(0, PAGE_SIZE))
+      .then((page) => {
+        if (!active || version !== requestVersion.current) return;
+        setItems(page.items);
+        setTotal(page.total);
+        setSelectedId((current) =>
+          current !== undefined && page.items.some((item) => item.id === current)
+            ? current
+            : undefined,
+        );
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [buildQuery]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -94,12 +212,14 @@ function App() {
 
       window.clearTimeout(refreshTimer.current);
       refreshTimer.current = window.setTimeout(() => {
-        void refreshMedia(Math.max(PAGE_SIZE, items.length)).catch((reason: unknown) => {
-          setError(reason instanceof Error ? reason.message : String(reason));
-        });
+        void refreshMedia(Math.max(PAGE_SIZE, items.length)).catch(
+          (reason: unknown) => {
+            setError(reason instanceof Error ? reason.message : String(reason));
+          },
+        );
 
         if (progress.done) {
-          void loadSources().catch(() => undefined);
+          void loadSourcesAndExtensions().catch(() => undefined);
         }
       }, progress.done ? 0 : 120);
     })
@@ -118,7 +238,7 @@ function App() {
       window.clearTimeout(refreshTimer.current);
       unlisten?.();
     };
-  }, [items.length, loadSources, refreshMedia]);
+  }, [items.length, loadSourcesAndExtensions, refreshMedia]);
 
   const handleAddSource = useCallback(async () => {
     setError(undefined);
@@ -135,9 +255,7 @@ function App() {
       });
 
       const started = await startScan(source.id);
-      if (!started) {
-        setError("Essa fonte já está sendo escaneada.");
-      }
+      if (!started) setError("Essa fonte já está sendo escaneada.");
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -157,30 +275,36 @@ function App() {
         return next;
       });
     } catch {
-      // A failed thumbnail remains a local placeholder in the 0.1 UI.
+      // O placeholder local continua visível se a mídia não decodificar.
     }
   }, []);
 
-  const handleLoadMore = useCallback(async () => {
-    if (loadingMore || items.length >= total) return;
+  const loadMorePage = useCallback(async (): Promise<MediaItem[]> => {
+    if (loadingMoreRef.current || items.length >= total) return [];
+    loadingMoreRef.current = true;
     setLoadingMore(true);
 
     try {
-      const page = await queryMedia(items.length, PAGE_SIZE);
-      setItems((current) => {
-        const known = new Set(current.map((item) => item.id));
-        return [...current, ...page.items.filter((item) => !known.has(item.id))];
-      });
+      const page = await queryMedia(buildQuery(items.length, PAGE_SIZE));
+      const known = new Set(items.map((item) => item.id));
+      const appended = page.items.filter((item) => !known.has(item.id));
+      setItems((current) => [...current, ...appended]);
       setTotal(page.total);
+      return appended;
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason));
+      return [];
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [items.length, loadingMore, total]);
+  }, [buildQuery, items, total]);
 
   const selectedIndex = useMemo(
-    () => (selectedId === undefined ? -1 : items.findIndex((item) => item.id === selectedId)),
+    () =>
+      selectedId === undefined
+        ? -1
+        : items.findIndex((item) => item.id === selectedId),
     [items, selectedId],
   );
   const selected = selectedIndex >= 0 ? items[selectedIndex] : undefined;
@@ -190,12 +314,42 @@ function App() {
   }, [items, selectedIndex]);
 
   const openNext = useCallback(() => {
-    if (selectedIndex >= 0 && selectedIndex < items.length - 1) {
-      setSelectedId(items[selectedIndex + 1].id);
-    }
-  }, [items, selectedIndex]);
+    if (selectedIndex < 0) return;
 
-  const activeScan = [...scanProgress.values()].find((progress) => !progress.done);
+    if (selectedIndex < items.length - 1) {
+      setSelectedId(items[selectedIndex + 1].id);
+      return;
+    }
+
+    if (items.length < total) {
+      void loadMorePage().then((appended) => {
+        if (appended[0]) setSelectedId(appended[0].id);
+      });
+    }
+  }, [items, loadMorePage, selectedIndex, total]);
+
+  const activeFilterCount =
+    selectedExtensions.length +
+    selectedSourceIds.length +
+    (mediaType === "all" ? 0 : 1) +
+    (dateFrom ? 1 : 0) +
+    (dateTo ? 1 : 0) +
+    (minSizeMb ? 1 : 0) +
+    (maxSizeMb ? 1 : 0);
+
+  const clearFilters = () => {
+    setMediaType("all");
+    setSelectedExtensions([]);
+    setSelectedSourceIds([]);
+    setDateFrom("");
+    setDateTo("");
+    setMinSizeMb("");
+    setMaxSizeMb("");
+  };
+
+  const activeScan = [...scanProgress.values()].find(
+    (progress) => !progress.done,
+  );
   const hasSources = sources.length > 0;
   const hasItems = items.length > 0;
 
@@ -242,7 +396,8 @@ function App() {
         <div className="source-strip" aria-label="Fontes">
           {sources.map((source) => {
             const progress = scanProgress.get(source.id);
-            const status = progress && !progress.done ? "scanning" : source.status;
+            const status =
+              progress && !progress.done ? "scanning" : source.status;
 
             return (
               <div className="source-pill" key={source.id} title={source.rootPath}>
@@ -262,10 +417,49 @@ function App() {
         </div>
       ) : null}
 
+      {hasSources ? (
+        <LibraryToolbar
+          search={searchInput}
+          onSearchChange={setSearchInput}
+          mediaType={mediaType}
+          onMediaTypeChange={setMediaType}
+          extensions={extensions}
+          selectedExtensions={selectedExtensions}
+          onToggleExtension={(extension) =>
+            setSelectedExtensions((current) =>
+              toggleValue(current, extension),
+            )
+          }
+          sources={sources}
+          selectedSourceIds={selectedSourceIds}
+          onToggleSource={(sourceId) =>
+            setSelectedSourceIds((current) => toggleValue(current, sourceId))
+          }
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          minSizeMb={minSizeMb}
+          maxSizeMb={maxSizeMb}
+          onMinSizeMbChange={setMinSizeMb}
+          onMaxSizeMbChange={setMaxSizeMb}
+          sort={sort}
+          onSortChange={setSort}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          minCardWidth={minCardWidth}
+          onMinCardWidthChange={setMinCardWidth}
+          activeFilterCount={activeFilterCount}
+          onClearFilters={clearFilters}
+        />
+      ) : null}
+
       {error ? (
         <div className="error-banner" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={() => setError(undefined)}>Fechar</button>
+          <button type="button" onClick={() => setError(undefined)}>
+            Fechar
+          </button>
         </div>
       ) : null}
 
@@ -273,7 +467,8 @@ function App() {
         <div className="scan-bar">
           <span className="scan-pulse" />
           <span>
-            Lendo a fonte… {activeScan.supported.toLocaleString("pt-PT")} mídias encontradas
+            Lendo a fonte…{" "}
+            {activeScan.supported.toLocaleString("pt-PT")} mídias encontradas
           </span>
         </div>
       ) : null}
@@ -285,10 +480,14 @@ function App() {
               <span />
             </div>
             <p className="eyebrow">Sua biblioteca começa aqui</p>
-            <h1>Escolha uma pasta.<br />O Lume cuida do resto.</h1>
+            <h1>
+              Escolha uma pasta.
+              <br />
+              O Lume cuida do resto.
+            </h1>
             <p>
-              Fotos, vídeos e GIFs aparecem numa única galeria. Os arquivos originais
-              continuam exatamente onde estão.
+              Fotos, vídeos e GIFs aparecem numa única galeria. Os arquivos
+              originais continuam exatamente onde estão.
             </p>
             <button
               className="primary-button primary-button-large"
@@ -299,28 +498,58 @@ function App() {
               <span aria-hidden="true">＋</span>
               Adicionar primeira pasta
             </button>
-            <span className="readonly-note">Somente leitura · nada será movido ou apagado</span>
+            <span className="readonly-note">
+              Somente leitura · nada será movido ou apagado
+            </span>
           </section>
         ) : !hasItems && activeScan ? (
           <section className="empty-state compact">
             <div className="loading-ring" aria-hidden="true" />
             <h2>Procurando suas mídias…</h2>
-            <p>As primeiras vão aparecer aqui sem esperar a varredura terminar.</p>
+            <p>
+              As primeiras vão aparecer aqui sem esperar a varredura terminar.
+            </p>
           </section>
         ) : !hasItems ? (
           <section className="empty-state compact">
-            <h2>Nenhuma mídia suportada por enquanto.</h2>
-            <p>Você pode adicionar outra pasta ou tentar novamente mais tarde.</p>
+            <h2>Nenhuma mídia corresponde ao que você pediu.</h2>
+            <p>Limpe a busca ou os filtros, ou adicione outra pasta.</p>
+            {search || activeFilterCount > 0 ? (
+              <button
+                className="toolbar-ghost-button empty-clear-button"
+                type="button"
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                  clearFilters();
+                }}
+              >
+                Limpar busca e filtros
+              </button>
+            ) : null}
           </section>
-        ) : (
+        ) : viewMode === "grid" ? (
           <MediaGrid
             items={items}
             thumbnails={thumbnails}
+            selectedId={selectedId}
+            minCardWidth={minCardWidth}
             hasMore={items.length < total}
             loadingMore={loadingMore}
             onNeedThumbnail={handleNeedThumbnail}
             onOpen={(item) => setSelectedId(item.id)}
-            onEndReached={() => void handleLoadMore()}
+            onEndReached={() => void loadMorePage()}
+          />
+        ) : (
+          <MediaList
+            items={items}
+            thumbnails={thumbnails}
+            selectedId={selectedId}
+            hasMore={items.length < total}
+            loadingMore={loadingMore}
+            onNeedThumbnail={handleNeedThumbnail}
+            onOpen={(item) => setSelectedId(item.id)}
+            onEndReached={() => void loadMorePage()}
           />
         )}
       </main>
@@ -329,7 +558,7 @@ function App() {
         <Viewer
           item={selected}
           canPrevious={selectedIndex > 0}
-          canNext={selectedIndex < items.length - 1}
+          canNext={selectedIndex < items.length - 1 || items.length < total}
           onPrevious={openPrevious}
           onNext={openNext}
           onClose={() => setSelectedId(undefined)}
