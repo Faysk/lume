@@ -273,7 +273,7 @@ pub fn query_media(db_path: &Path, offset: u32, limit: u32) -> Result<MediaPage>
         ",
     )?;
 
-    let rows = statement.query_map(params![limit, offset], |row| {
+    let rows = statement.query_map(params![i64::from(limit), i64::from(offset)], |row| {
         Ok(MediaItem {
             id: row.get(0)?,
             source_id: row.get(1)?,
