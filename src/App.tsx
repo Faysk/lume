@@ -11,10 +11,12 @@ import {
   addSource,
   cancelScan,
   chooseSourceDirectory,
+  getUiPreferences,
   listExtensions,
   listSources,
   queryMedia,
   removeSource,
+  saveUiPreferences,
   startScan,
   thumbnailUrl,
 } from "./lib/api";
@@ -24,6 +26,7 @@ import type {
   MediaSort,
   ScanProgress,
   Source,
+  ThemePreference,
 } from "./lib/types";
 
 const PAGE_SIZE = 240;
@@ -90,6 +93,8 @@ function App() {
   const [sort, setSort] = useState<MediaSort>("date_desc");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [minCardWidth, setMinCardWidth] = useState(188);
+  const [theme, setTheme] = useState<ThemePreference>("system");
+  const [preferencesReady, setPreferencesReady] = useState(false);
 
   const thumbnailAttempts = useRef(new Set<number>());
   const thumbnailQueue = useRef<MediaItem[]>([]);
@@ -102,6 +107,34 @@ function App() {
     const timer = window.setTimeout(() => setSearch(searchInput.trim()), 260);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "system") {
+      root.removeAttribute("data-theme");
+    } else {
+      root.dataset.theme = theme;
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+
+    const timer = window.setTimeout(() => {
+      void saveUiPreferences({
+        version: 1,
+        theme,
+        viewMode,
+        sort,
+        thumbnailWidth: minCardWidth,
+      }).catch(() => {
+        // Preferências não bloqueiam o uso da biblioteca.
+      });
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [minCardWidth, preferencesReady, sort, theme, viewMode]);
+
 
   const baseQuery = useMemo<Omit<MediaQuery, "offset" | "limit">>(
     () => ({
@@ -161,7 +194,15 @@ function App() {
   useEffect(() => {
     let active = true;
 
-    loadSourcesAndExtensions()
+    Promise.all([loadSourcesAndExtensions(), getUiPreferences()])
+      .then(([, preferences]) => {
+        if (!active) return;
+        setTheme(preferences.theme);
+        setViewMode(preferences.viewMode);
+        setSort(preferences.sort);
+        setMinCardWidth(preferences.thumbnailWidth);
+        setPreferencesReady(true);
+      })
       .catch((reason: unknown) => {
         if (active) {
           setError(reason instanceof Error ? reason.message : String(reason));
@@ -556,6 +597,8 @@ function App() {
           onViewModeChange={setViewMode}
           minCardWidth={minCardWidth}
           onMinCardWidthChange={setMinCardWidth}
+          theme={theme}
+          onThemeChange={setTheme}
           activeFilterCount={activeFilterCount}
           onClearFilters={clearFilters}
         />
