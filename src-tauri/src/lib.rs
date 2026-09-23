@@ -1,4 +1,5 @@
 mod db;
+mod diagnostics;
 mod models;
 mod scanner;
 mod thumbnails;
@@ -108,6 +109,11 @@ fn start_scan(
             source_id,
             cancel,
         ) {
+            diagnostics::log(
+                &state,
+                "ERROR",
+                format!("scan source_id={source_id} failed: {error}"),
+            );
             let _ = db::mark_scan_error(&state.db_path, source_id);
             let _ = app_for_task.emit(
                 "scan-progress",
@@ -285,6 +291,22 @@ fn media_full_path(
 }
 
 #[tauri::command]
+fn open_logs_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let Some(log_dir) = state.log_path.parent() else {
+        return Err("Diretório de logs indisponível.".into());
+    };
+    fs::create_dir_all(log_dir)
+        .map_err(|error| format!("Não foi possível preparar os logs: {error}"))?;
+    diagnostics::log(state.inner(), "INFO", "logs folder requested from UI");
+    app.opener()
+        .open_path(log_dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|error| format!("Não foi possível abrir a pasta de logs: {error}"))
+}
+
+#[tauri::command]
 fn cache_size(state: State<'_, AppState>) -> u64 {
     directory_size(&state.cache_dir)
 }
@@ -344,8 +366,13 @@ pub fn run() {
 
             let state = AppState::new(data_dir.join("library.db"), cache_dir);
             db::init_database(&state.db_path)?;
-            db::recover_interrupted_scans(&state.db_path)?;
+            let interrupted = db::recover_interrupted_scans(&state.db_path)?;
             db::refresh_source_availability(&state.db_path)?;
+            diagnostics::log(
+                &state,
+                "INFO",
+                format!("startup complete; recovered interrupted scans={interrupted}"),
+            );
 
             for source in db::list_sources(&state.db_path)? {
                 let root = PathBuf::from(source.root_path);
@@ -377,6 +404,7 @@ pub fn run() {
             media_full_path,
             cache_size,
             clear_thumbnail_cache,
+            open_logs_folder,
             media_asset_path
         ])
         .run(tauri::generate_context!())
