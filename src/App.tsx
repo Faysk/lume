@@ -9,8 +9,10 @@ import { SourceManager } from "./components/SourceManager";
 import { Viewer } from "./components/Viewer";
 import {
   addSource,
+  cacheSize,
   cancelScan,
   chooseSourceDirectory,
+  clearThumbnailCache,
   getUiPreferences,
   listExtensions,
   listSources,
@@ -80,6 +82,8 @@ function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
   const [sourceManagerOpen, setSourceManagerOpen] = useState(false);
+  const [cacheBytes, setCacheBytes] = useState(0);
+  const [clearingCache, setClearingCache] = useState(false);
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -134,6 +138,13 @@ function App() {
 
     return () => window.clearTimeout(timer);
   }, [minCardWidth, preferencesReady, sort, theme, viewMode]);
+
+  useEffect(() => {
+    if (!sourceManagerOpen) return;
+    void cacheSize()
+      .then(setCacheBytes)
+      .catch(() => setCacheBytes(0));
+  }, [sourceManagerOpen]);
 
 
   const baseQuery = useMemo<Omit<MediaQuery, "offset" | "limit">>(
@@ -366,6 +377,25 @@ function App() {
     },
     [loadSourcesAndExtensions, refreshMedia],
   );
+
+  const handleClearCache = useCallback(async () => {
+    if (!window.confirm("Limpar os thumbnails gerados pelo Lume? Os arquivos originais não serão tocados.")) {
+      return;
+    }
+
+    setClearingCache(true);
+    try {
+      await clearThumbnailCache();
+      setThumbnails(new Map());
+      thumbnailAttempts.current.clear();
+      thumbnailQueue.current = [];
+      setCacheBytes(0);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setClearingCache(false);
+    }
+  }, []);
 
   const pumpThumbnailQueue = useCallback(() => {
     const runNext = () => {
@@ -724,6 +754,9 @@ function App() {
           onRescan={(sourceId) => void handleRescan(sourceId)}
           onCancel={(sourceId) => void handleCancelScan(sourceId)}
           onRemove={(source) => void handleRemoveSource(source)}
+          cacheBytes={cacheBytes}
+          clearingCache={clearingCache}
+          onClearCache={() => void handleClearCache()}
         />
       ) : null}
     </div>
