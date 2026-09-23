@@ -53,7 +53,9 @@ export function Viewer({
   const [actualSize, setActualSize] = useState(false);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const dialogRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ pointerId: number; start: Point; origin: Point }>();
+  const dragRef = useRef<
+    { pointerId: number; start: Point; origin: Point } | undefined
+  >(undefined);
 
   useEffect(() => {
     let active = true;
