@@ -25,6 +25,16 @@ fn safe_media_path(root: &Path, relative: &Path) -> Result<PathBuf> {
 
 pub fn ensure_thumbnail(state: &AppState, media_id: i64) -> Result<String> {
     let media = db::media_path(&state.db_path, media_id)?;
+    let thumbnail_dir = state.cache_dir.join("thumbnails");
+    fs::create_dir_all(&thumbnail_dir)?;
+
+    let version = media.modified_at_fs.unwrap_or(0);
+    let output = thumbnail_dir.join(format!("{media_id}-{version}.png"));
+
+    if output.is_file() {
+        return Ok(output.to_string_lossy().into_owned());
+    }
+
     let root = Path::new(&media.root_path);
     let relative = Path::new(&media.relative_path);
     let source_path = safe_media_path(root, relative)?;
@@ -37,16 +47,6 @@ pub fn ensure_thumbnail(state: &AppState, media_id: i64) -> Result<String> {
 
     if !matches!(extension.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif") {
         anyhow::bail!("thumbnail generation is not available for this media type yet");
-    }
-
-    let thumbnail_dir = state.cache_dir.join("thumbnails");
-    fs::create_dir_all(&thumbnail_dir)?;
-
-    let version = media.modified_at_fs.unwrap_or(0);
-    let output = thumbnail_dir.join(format!("{media_id}-{version}.png"));
-
-    if output.is_file() {
-        return Ok(output.to_string_lossy().into_owned());
     }
 
     let result = (|| -> Result<(u32, u32)> {
@@ -186,6 +186,57 @@ mod tests {
         assert_eq!(original_after.height(), 600);
 
         fs::remove_dir_all(root).expect("temporary tree should be removable");
+    }
+
+    #[test]
+    fn cached_thumbnail_remains_available_when_source_goes_offline() {
+        let root = temporary_root("offline-cache");
+        let source_dir = root.join("source");
+        let cache_dir = root.join("cache");
+        let data_dir = root.join("data");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&cache_dir).unwrap();
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let original = source_dir.join("photo.png");
+        ImageBuffer::from_pixel(320, 240, Rgba([1_u8, 2, 3, 255]))
+            .save(&original)
+            .unwrap();
+
+        let db_path = data_dir.join("library.db");
+        db::init_database(&db_path).unwrap();
+        let source = db::insert_or_get_source(
+            &db_path,
+            &source_dir.to_string_lossy(),
+            "Offline",
+        )
+        .unwrap();
+
+        db::upsert_media_batch(
+            &db_path,
+            source.id,
+            &[DiscoveredMedia {
+                relative_path: "photo.png".into(),
+                file_name: "photo.png".into(),
+                extension: "png".into(),
+                media_type: "image".into(),
+                size_bytes: 1,
+                created_at_fs: Some(1),
+                modified_at_fs: Some(99),
+            }],
+        )
+        .unwrap();
+
+        let media_id = db::query_media(&db_path, 0, 1).unwrap().items[0].id;
+        let state = AppState::new(db_path, cache_dir);
+        let cached = ensure_thumbnail(&state, media_id).unwrap();
+        assert!(Path::new(&cached).is_file());
+
+        fs::remove_dir_all(&source_dir).unwrap();
+        let reused = ensure_thumbnail(&state, media_id).unwrap();
+        assert_eq!(cached, reused);
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
