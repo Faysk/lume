@@ -12,7 +12,14 @@ use crate::models::{MediaItem, MediaPage, MediaQuery, Source};
 pub struct AppState {
     pub db_path: PathBuf,
     pub cache_dir: PathBuf,
-    pub scanning: Arc<Mutex<std::collections::HashSet<i64>>>,
+    pub scanning: Arc<
+        Mutex<
+            std::collections::HashMap<
+                i64,
+                Arc<std::sync::atomic::AtomicBool>,
+            >,
+        >,
+    >,
 }
 
 impl AppState {
@@ -20,7 +27,7 @@ impl AppState {
         Self {
             db_path,
             cache_dir,
-            scanning: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            scanning: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -67,6 +74,12 @@ pub fn init_database(path: &Path) -> Result<()> {
         connection
             .execute_batch(include_str!("../migrations/0001_initial.sql"))
             .context("failed to apply migration 0001_initial")?;
+    }
+
+    if current_version < 2 {
+        connection
+            .execute_batch(include_str!("../migrations/0002_scan_reconciliation.sql"))
+            .context("failed to apply migration 0002_scan_reconciliation")?;
     }
 
     Ok(())
@@ -163,29 +176,126 @@ pub fn list_sources(db_path: &Path) -> Result<Vec<Source>> {
         .context("failed to read sources")
 }
 
-pub fn mark_scan_started(db_path: &Path, source_id: i64) -> Result<()> {
+pub fn refresh_source_availability(db_path: &Path) -> Result<()> {
     let connection = open(db_path)?;
-    connection.execute(
+    let sources = {
+        let mut statement = connection.prepare(
+            "SELECT id, root_path, status FROM sources ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    for (id, root_path, status) in sources {
+        if status == "scanning" {
+            continue;
+        }
+
+        let desired = if Path::new(&root_path).is_dir() {
+            "online"
+        } else {
+            "offline"
+        };
+
+        if desired != status {
+            connection.execute(
+                "UPDATE sources SET status = ?2 WHERE id = ?1",
+                params![id, desired],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn remove_source(db_path: &Path, source_id: i64) -> Result<bool> {
+    let connection = open(db_path)?;
+    let affected = connection.execute(
+        "DELETE FROM sources WHERE id = ?1",
+        params![source_id],
+    )?;
+    Ok(affected > 0)
+}
+
+pub fn mark_scan_started(db_path: &Path, source_id: i64) -> Result<i64> {
+    let connection = open(db_path)?;
+    let affected = connection.execute(
         "
         UPDATE sources
         SET status = 'scanning',
+            scan_generation = scan_generation + 1,
             last_scan_started_at = CURRENT_TIMESTAMP
         WHERE id = ?1
         ",
         params![source_id],
     )?;
-    Ok(())
+
+    if affected == 0 {
+        anyhow::bail!("source {source_id} not found");
+    }
+
+    connection
+        .query_row(
+            "SELECT scan_generation FROM sources WHERE id = ?1",
+            params![source_id],
+            |row| row.get(0),
+        )
+        .context("failed to read source scan generation")
 }
 
-pub fn mark_scan_finished(db_path: &Path, source_id: i64) -> Result<()> {
-    let connection = open(db_path)?;
-    connection.execute(
+pub fn finish_scan_and_reconcile(
+    db_path: &Path,
+    source_id: i64,
+    generation: i64,
+) -> Result<()> {
+    let mut connection = open(db_path)?;
+    let transaction = connection.transaction()?;
+
+    transaction.execute(
+        "
+        UPDATE media
+        SET is_present = 0,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE source_id = ?1
+          AND last_seen_generation <> ?2
+          AND is_present = 1
+        ",
+        params![source_id, generation],
+    )?;
+
+    transaction.execute(
         "
         UPDATE sources
         SET status = 'online',
             last_scan_finished_at = CURRENT_TIMESTAMP
         WHERE id = ?1
         ",
+        params![source_id],
+    )?;
+
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn mark_scan_cancelled(db_path: &Path, source_id: i64) -> Result<()> {
+    let connection = open(db_path)?;
+    connection.execute(
+        "UPDATE sources SET status = 'online' WHERE id = ?1",
+        params![source_id],
+    )?;
+    Ok(())
+}
+
+pub fn mark_source_offline(db_path: &Path, source_id: i64) -> Result<()> {
+    let connection = open(db_path)?;
+    connection.execute(
+        "UPDATE sources SET status = 'offline' WHERE id = ?1",
         params![source_id],
     )?;
     Ok(())
@@ -205,6 +315,15 @@ pub fn upsert_media_batch(
     source_id: i64,
     items: &[DiscoveredMedia],
 ) -> Result<()> {
+    upsert_media_batch_for_scan(db_path, source_id, 0, items)
+}
+
+pub fn upsert_media_batch_for_scan(
+    db_path: &Path,
+    source_id: i64,
+    generation: i64,
+    items: &[DiscoveredMedia],
+) -> Result<()> {
     if items.is_empty() {
         return Ok(());
     }
@@ -217,9 +336,10 @@ pub fn upsert_media_batch(
             "
             INSERT INTO media(
                 source_id, relative_path, file_name, extension, media_type,
-                size_bytes, created_at_fs, modified_at_fs
+                size_bytes, created_at_fs, modified_at_fs,
+                is_present, last_seen_generation
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)
             ON CONFLICT(source_id, relative_path) DO UPDATE SET
                 file_name = excluded.file_name,
                 extension = excluded.extension,
@@ -227,6 +347,8 @@ pub fn upsert_media_batch(
                 size_bytes = excluded.size_bytes,
                 created_at_fs = excluded.created_at_fs,
                 modified_at_fs = excluded.modified_at_fs,
+                is_present = 1,
+                last_seen_generation = excluded.last_seen_generation,
                 thumbnail_state = CASE
                     WHEN media.modified_at_fs IS excluded.modified_at_fs
                     THEN media.thumbnail_state
@@ -246,6 +368,7 @@ pub fn upsert_media_batch(
                 item.size_bytes,
                 item.created_at_fs,
                 item.modified_at_fs,
+                generation,
             ])?;
         }
     }
@@ -257,7 +380,7 @@ pub fn upsert_media_batch(
 pub fn list_extensions(db_path: &Path) -> Result<Vec<String>> {
     let connection = open(db_path)?;
     let mut statement = connection.prepare(
-        "SELECT DISTINCT extension FROM media ORDER BY extension COLLATE NOCASE ASC",
+        "SELECT DISTINCT extension FROM media WHERE is_present = 1 ORDER BY extension COLLATE NOCASE ASC",
     )?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -272,7 +395,7 @@ fn escape_like(value: &str) -> String {
 }
 
 fn build_media_filter(query: &MediaQuery) -> (String, Vec<Value>) {
-    let mut clauses = Vec::new();
+    let mut clauses = vec!["m.is_present = 1".to_string()];
     let mut values = Vec::new();
 
     if let Some(search) = query.search.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
@@ -530,7 +653,7 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal mode should be readable");
 
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
 
         drop(connection);
@@ -576,6 +699,84 @@ mod tests {
         assert_eq!(first.items[0].file_name, "one.jpg");
         assert_eq!(second.items.len(), 1);
         assert_eq!(second.items[0].file_name, "two.mp4");
+
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
+    #[test]
+    fn completed_scan_reconciles_missing_items_but_cancelled_scan_does_not() {
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).expect("migration should succeed");
+        let source = insert_or_get_source(&db_path, r"C:\Reconcile", "Reconcile").unwrap();
+
+        let generation_one = mark_scan_started(&db_path, source.id).unwrap();
+        upsert_media_batch_for_scan(
+            &db_path,
+            source.id,
+            generation_one,
+            &[
+                DiscoveredMedia {
+                    relative_path: "keep.jpg".into(),
+                    file_name: "keep.jpg".into(),
+                    extension: "jpg".into(),
+                    media_type: "image".into(),
+                    size_bytes: 10,
+                    created_at_fs: Some(1),
+                    modified_at_fs: Some(1),
+                },
+                DiscoveredMedia {
+                    relative_path: "gone.jpg".into(),
+                    file_name: "gone.jpg".into(),
+                    extension: "jpg".into(),
+                    media_type: "image".into(),
+                    size_bytes: 20,
+                    created_at_fs: Some(1),
+                    modified_at_fs: Some(1),
+                },
+            ],
+        ).unwrap();
+        finish_scan_and_reconcile(&db_path, source.id, generation_one).unwrap();
+        assert_eq!(query_media(&db_path, 0, 50).unwrap().total, 2);
+
+        let generation_two = mark_scan_started(&db_path, source.id).unwrap();
+        upsert_media_batch_for_scan(
+            &db_path,
+            source.id,
+            generation_two,
+            &[DiscoveredMedia {
+                relative_path: "keep.jpg".into(),
+                file_name: "keep.jpg".into(),
+                extension: "jpg".into(),
+                media_type: "image".into(),
+                size_bytes: 10,
+                created_at_fs: Some(1),
+                modified_at_fs: Some(1),
+            }],
+        ).unwrap();
+
+        mark_scan_cancelled(&db_path, source.id).unwrap();
+        assert_eq!(query_media(&db_path, 0, 50).unwrap().total, 2);
+
+        let generation_three = mark_scan_started(&db_path, source.id).unwrap();
+        upsert_media_batch_for_scan(
+            &db_path,
+            source.id,
+            generation_three,
+            &[DiscoveredMedia {
+                relative_path: "keep.jpg".into(),
+                file_name: "keep.jpg".into(),
+                extension: "jpg".into(),
+                media_type: "image".into(),
+                size_bytes: 10,
+                created_at_fs: Some(1),
+                modified_at_fs: Some(1),
+            }],
+        ).unwrap();
+        finish_scan_and_reconcile(&db_path, source.id, generation_three).unwrap();
+
+        let page = query_media(&db_path, 0, 50).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].file_name, "keep.jpg");
 
         fs::remove_dir_all(root).expect("temporary catalog should be removable");
     }
