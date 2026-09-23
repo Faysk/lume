@@ -360,3 +360,105 @@ pub fn mark_thumbnail_failed(db_path: &Path, media_id: i64) -> Result<()> {
     )?;
     Ok(())
 }
+
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    fn temporary_catalog() -> (PathBuf, PathBuf) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("lume-db-test-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).expect("temporary directory should be created");
+        (root.join("library.db"), root)
+    }
+
+    #[test]
+    fn migration_is_idempotent_and_sets_version() {
+        let (db_path, root) = temporary_catalog();
+
+        init_database(&db_path).expect("first migration should succeed");
+        init_database(&db_path).expect("second migration should be idempotent");
+
+        let connection = open(&db_path).expect("catalog should reopen");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("user_version should be readable");
+        let journal_mode: String = connection
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("journal mode should be readable");
+
+        assert_eq!(version, 1);
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+
+        drop(connection);
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
+    #[test]
+    fn media_query_is_bounded_and_deterministic() {
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).expect("migration should succeed");
+
+        let source = insert_or_get_source(&db_path, r"C:\Synthetic", "Synthetic")
+            .expect("source should be inserted");
+
+        let items = vec![
+            DiscoveredMedia {
+                relative_path: "one.jpg".into(),
+                file_name: "one.jpg".into(),
+                extension: "jpg".into(),
+                media_type: "image".into(),
+                size_bytes: 10,
+                created_at_fs: Some(1),
+                modified_at_fs: Some(1),
+            },
+            DiscoveredMedia {
+                relative_path: "two.mp4".into(),
+                file_name: "two.mp4".into(),
+                extension: "mp4".into(),
+                media_type: "video".into(),
+                size_bytes: 20,
+                created_at_fs: Some(2),
+                modified_at_fs: Some(2),
+            },
+        ];
+
+        upsert_media_batch(&db_path, source.id, &items).expect("batch should persist");
+
+        let first = query_media(&db_path, 0, 1).expect("first page should load");
+        let second = query_media(&db_path, 1, 1).expect("second page should load");
+
+        assert_eq!(first.total, 2);
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(first.items[0].file_name, "one.jpg");
+        assert_eq!(second.items.len(), 1);
+        assert_eq!(second.items[0].file_name, "two.mp4");
+
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
+    #[test]
+    fn duplicate_source_is_reused() {
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).expect("migration should succeed");
+
+        let first = insert_or_get_source(&db_path, r"D:\Media", "Media")
+            .expect("source should be inserted");
+        let second = insert_or_get_source(&db_path, r"D:\Media", "Renamed")
+            .expect("source should be reused");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(second.display_name, "Renamed");
+
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+}
