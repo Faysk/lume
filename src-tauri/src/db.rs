@@ -571,6 +571,43 @@ pub fn query_media_filtered(db_path: &Path, query: &MediaQuery) -> Result<MediaP
     })
 }
 
+pub fn get_media_item(db_path: &Path, media_id: i64) -> Result<MediaItem> {
+    let connection = open(db_path)?;
+    connection
+        .query_row(
+            "
+            SELECT
+                m.id, m.source_id, m.relative_path, m.file_name, m.extension,
+                m.media_type, m.size_bytes, m.created_at_fs, m.modified_at_fs,
+                m.width, m.height, m.thumbnail_state,
+                s.display_name, s.root_path
+            FROM media m
+            JOIN sources s ON s.id = m.source_id
+            WHERE m.id = ?1
+            ",
+            params![media_id],
+            |row| {
+                Ok(MediaItem {
+                    id: row.get(0)?,
+                    source_id: row.get(1)?,
+                    relative_path: row.get(2)?,
+                    file_name: row.get(3)?,
+                    extension: row.get(4)?,
+                    media_type: row.get(5)?,
+                    size_bytes: row.get(6)?,
+                    created_at_fs: row.get(7)?,
+                    modified_at_fs: row.get(8)?,
+                    width: row.get(9)?,
+                    height: row.get(10)?,
+                    thumbnail_state: row.get(11)?,
+                    source_name: row.get(12)?,
+                    source_root: row.get(13)?,
+                })
+            },
+        )
+        .with_context(|| format!("media {media_id} not found"))
+}
+
 pub fn media_path(db_path: &Path, media_id: i64) -> Result<MediaPath> {
     let connection = open(db_path)?;
     connection
