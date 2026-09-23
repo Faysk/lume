@@ -16,6 +16,7 @@ import {
   getUiPreferences,
   listExtensions,
   listSources,
+  openLogsFolder,
   queryMedia,
   removeSource,
   saveUiPreferences,
@@ -757,6 +758,11 @@ function App() {
           cacheBytes={cacheBytes}
           clearingCache={clearingCache}
           onClearCache={() => void handleClearCache()}
+          onOpenLogs={() =>
+            void openLogsFolder().catch((reason: unknown) => {
+              setError(reason instanceof Error ? reason.message : String(reason));
+            })
+          }
         />
       ) : null}
     </div>
