@@ -8,7 +8,13 @@ O produto nasce de uma regra simples: **resolver muito bem o problema principal 
 
 ## Estado
 
-🚧 **Fundação / planejamento da V1**
+🚧 **Fundação concluída; implementação da 0.1 é o próximo marco.**
+
+O backlog está planejado em GitHub Issues da **0.1 até a 1.0**:
+
+- [Backlog mestre — Lume 0.1 → 1.0](https://github.com/Faysk/lume/issues/97)
+- [0.1 — primeira versão visualmente funcional](https://github.com/Faysk/lume/issues/2)
+- [1.0 — release estável](https://github.com/Faysk/lume/issues/11)
 
 Os projetos anteriores `signal-archive` e `Memoria-Local` são referências de aprendizado, não bases de código do Lume.
 
