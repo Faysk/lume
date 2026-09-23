@@ -39,3 +39,25 @@ export interface ScanProgress {
   done: boolean;
   message: string | null;
 }
+
+export type MediaSort =
+  | "date_desc"
+  | "date_asc"
+  | "name_asc"
+  | "name_desc"
+  | "size_desc"
+  | "size_asc";
+
+export interface MediaQuery {
+  offset: number;
+  limit: number;
+  search?: string | null;
+  mediaType?: "image" | "video" | null;
+  extensions: string[];
+  sourceIds: number[];
+  modifiedFrom?: number | null;
+  modifiedTo?: number | null;
+  minSizeBytes?: number | null;
+  maxSizeBytes?: number | null;
+  sort?: MediaSort | null;
+}
