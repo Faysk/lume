@@ -29,7 +29,7 @@ pub fn ensure_thumbnail(state: &AppState, media_id: i64) -> Result<String> {
     fs::create_dir_all(&thumbnail_dir)?;
 
     let version = media.modified_at_fs.unwrap_or(0);
-    let output = thumbnail_dir.join(format!("{media_id}-{version}.png"));
+    let output = thumbnail_dir.join(format!("v2-{media_id}-{version}.png"));
 
     if output.is_file() {
         return Ok(output.to_string_lossy().into_owned());
