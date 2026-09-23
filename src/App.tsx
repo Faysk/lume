@@ -247,8 +247,11 @@ function App() {
             return (
               <div className="source-pill" key={source.id} title={source.rootPath}>
                 <span className={`status-dot status-${status}`} />
-                <strong>{source.displayName}</strong>
-                <span>
+                <span className="source-copy">
+                  <strong>{source.displayName}</strong>
+                  <span className="source-path">{source.rootPath}</span>
+                </span>
+                <span className="source-state">
                   {progress && !progress.done
                     ? `${progress.supported.toLocaleString("pt-PT")} encontradas`
                     : sourceStatusLabel({ ...source, status })}
