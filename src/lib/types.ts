@@ -62,3 +62,13 @@ export interface MediaQuery {
   maxSizeBytes?: number | null;
   sort?: MediaSort | null;
 }
+
+export type ThemePreference = "system" | "light" | "dark";
+
+export interface UiPreferences {
+  version: number;
+  theme: ThemePreference;
+  viewMode: "grid" | "list";
+  sort: MediaSort;
+  thumbnailWidth: number;
+}
