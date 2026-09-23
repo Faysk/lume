@@ -68,3 +68,45 @@ pub struct ScanProgress {
     pub cancelled: bool,
     pub message: Option<String>,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiPreferences {
+    pub version: u32,
+    pub theme: String,
+    pub view_mode: String,
+    pub sort: String,
+    pub thumbnail_width: u32,
+}
+
+impl Default for UiPreferences {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            theme: "system".into(),
+            view_mode: "grid".into(),
+            sort: "date_desc".into(),
+            thumbnail_width: 188,
+        }
+    }
+}
+
+impl UiPreferences {
+    pub fn normalized(mut self) -> Self {
+        if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
+            self.theme = "system".into();
+        }
+        if !matches!(self.view_mode.as_str(), "grid" | "list") {
+            self.view_mode = "grid".into();
+        }
+        if !matches!(
+            self.sort.as_str(),
+            "date_desc" | "date_asc" | "name_asc" | "name_desc" | "size_desc" | "size_asc"
+        ) {
+            self.sort = "date_desc".into();
+        }
+        self.version = 1;
+        self.thumbnail_width = self.thumbnail_width.clamp(120, 320);
+        self
+    }
+}
