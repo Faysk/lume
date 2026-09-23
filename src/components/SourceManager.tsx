@@ -8,6 +8,16 @@ interface SourceManagerProps {
   onRescan: (sourceId: number) => void;
   onCancel: (sourceId: number) => void;
   onRemove: (source: Source) => void;
+  cacheBytes: number;
+  clearingCache: boolean;
+  onClearCache: () => void;
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+  return `${(value / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function statusLabel(status: string): string {
@@ -31,6 +41,9 @@ export function SourceManager({
   onRescan,
   onCancel,
   onRemove,
+  cacheBytes,
+  clearingCache,
+  onClearCache,
 }: SourceManagerProps) {
   return (
     <div className="source-manager-backdrop" role="presentation" onMouseDown={onClose}>
@@ -107,7 +120,22 @@ export function SourceManager({
         </div>
 
         <footer className="source-manager-footer">
-          <span>Remover uma fonte só limpa o catálogo do Lume. Os arquivos físicos não são tocados.</span>
+          <div className="source-manager-storage">
+            <span>
+              Remover uma fonte só limpa o catálogo do Lume. Os arquivos físicos não são tocados.
+            </span>
+            <span>
+              Cache local: <strong>{formatBytes(cacheBytes)}</strong>
+              <button
+                className="cache-clear-button"
+                type="button"
+                disabled={clearingCache || cacheBytes === 0}
+                onClick={onClearCache}
+              >
+                {clearingCache ? "Limpando…" : "Limpar cache"}
+              </button>
+            </span>
+          </div>
           <button className="primary-button" type="button" onClick={onAdd}>
             ＋ Adicionar pasta
           </button>
