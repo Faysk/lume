@@ -32,7 +32,12 @@ pub fn ensure_thumbnail(state: &AppState, media_id: i64) -> Result<String> {
     let output = thumbnail_dir.join(format!("v2-{media_id}-{version}.png"));
 
     if output.is_file() {
-        return Ok(output.to_string_lossy().into_owned());
+        if image::image_dimensions(&output).is_ok() {
+            return Ok(output.to_string_lossy().into_owned());
+        }
+
+        let _ = fs::remove_file(&output);
+        let _ = db::mark_thumbnail_pending(&state.db_path, media_id);
     }
 
     let root = Path::new(&media.root_path);
@@ -242,6 +247,57 @@ mod tests {
         fs::remove_dir_all(&source_dir).unwrap();
         let reused = ensure_thumbnail(&state, media_id).unwrap();
         assert_eq!(cached, reused);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_cached_thumbnail_is_regenerated() {
+        let root = temporary_root("corrupt-cache");
+        let source_dir = root.join("source");
+        let cache_dir = root.join("cache");
+        let data_dir = root.join("data");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&cache_dir).unwrap();
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let original = source_dir.join("photo.png");
+        ImageBuffer::from_pixel(640, 360, Rgba([10_u8, 20, 30, 255]))
+            .save(&original)
+            .unwrap();
+
+        let db_path = data_dir.join("library.db");
+        db::init_database(&db_path).unwrap();
+        let source = db::insert_or_get_source(
+            &db_path,
+            &source_dir.to_string_lossy(),
+            "Corrupt",
+        )
+        .unwrap();
+
+        db::upsert_media_batch(
+            &db_path,
+            source.id,
+            &[DiscoveredMedia {
+                relative_path: "photo.png".into(),
+                file_name: "photo.png".into(),
+                extension: "png".into(),
+                media_type: "image".into(),
+                size_bytes: 1,
+                created_at_fs: Some(1),
+                modified_at_fs: Some(77),
+            }],
+        )
+        .unwrap();
+
+        let media_id = db::query_media(&db_path, 0, 1).unwrap().items[0].id;
+        let state = AppState::new(db_path, cache_dir);
+        let cached = PathBuf::from(ensure_thumbnail(&state, media_id).unwrap());
+        fs::write(&cached, b"broken-thumbnail").unwrap();
+
+        let regenerated = PathBuf::from(ensure_thumbnail(&state, media_id).unwrap());
+        assert_eq!(cached, regenerated);
+        assert!(image::image_dimensions(&regenerated).is_ok());
 
         fs::remove_dir_all(root).unwrap();
     }
