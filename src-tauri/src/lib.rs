@@ -6,6 +6,10 @@ mod thumbnails;
 use std::{
     fs,
     path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use models::{MediaPage, MediaQuery, ScanProgress, Source};
@@ -20,6 +24,7 @@ fn health() -> &'static str {
 
 #[tauri::command]
 fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, String> {
+    db::refresh_source_availability(&state.db_path).map_err(|error| error.to_string())?;
     db::list_sources(&state.db_path).map_err(|error| error.to_string())
 }
 
@@ -63,22 +68,31 @@ fn start_scan(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+
     {
         let mut scanning = state
             .scanning
             .lock()
             .map_err(|_| "scanner state is unavailable".to_string())?;
 
-        if !scanning.insert(source_id) {
+        if scanning.contains_key(&source_id) {
             return Ok(false);
         }
+
+        scanning.insert(source_id, cancel.clone());
     }
 
     let state = state.inner().clone();
     let app_for_task = app.clone();
 
     std::thread::spawn(move || {
-        if let Err(error) = scanner::run_scan(app_for_task.clone(), state.clone(), source_id) {
+        if let Err(error) = scanner::run_scan(
+            app_for_task.clone(),
+            state.clone(),
+            source_id,
+            cancel,
+        ) {
             let _ = db::mark_scan_error(&state.db_path, source_id);
             let _ = app_for_task.emit(
                 "scan-progress",
@@ -88,6 +102,7 @@ fn start_scan(
                     supported: 0,
                     errors: 1,
                     done: true,
+                    cancelled: false,
                     message: Some(error.to_string()),
                 },
             );
@@ -99,6 +114,37 @@ fn start_scan(
     });
 
     Ok(true)
+}
+
+#[tauri::command]
+fn cancel_scan(source_id: i64, state: State<'_, AppState>) -> Result<bool, String> {
+    let scanning = state
+        .scanning
+        .lock()
+        .map_err(|_| "scanner state is unavailable".to_string())?;
+
+    let Some(cancel) = scanning.get(&source_id) else {
+        return Ok(false);
+    };
+
+    cancel.store(true, Ordering::Relaxed);
+    Ok(true)
+}
+
+#[tauri::command]
+fn remove_source(source_id: i64, state: State<'_, AppState>) -> Result<bool, String> {
+    {
+        let scanning = state
+            .scanning
+            .lock()
+            .map_err(|_| "scanner state is unavailable".to_string())?;
+
+        if scanning.contains_key(&source_id) {
+            return Err("Cancele a varredura antes de remover esta fonte.".into());
+        }
+    }
+
+    db::remove_source(&state.db_path, source_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -135,7 +181,7 @@ fn media_asset_path(
 ) -> Result<String, String> {
     let media = db::media_path(&state.db_path, media_id).map_err(|error| error.to_string())?;
     let root = fs::canonicalize(&media.root_path)
-        .map_err(|error| format!("source is unavailable: {error}"))?;
+        .map_err(|_| "A fonte desta mídia está offline ou indisponível.".to_string())?;
     let full = fs::canonicalize(root.join(&media.relative_path))
         .map_err(|error| format!("media is unavailable: {error}"))?;
 
@@ -163,6 +209,7 @@ pub fn run() {
 
             let state = AppState::new(data_dir.join("library.db"), cache_dir);
             db::init_database(&state.db_path)?;
+            db::refresh_source_availability(&state.db_path)?;
 
             for source in db::list_sources(&state.db_path)? {
                 let root = PathBuf::from(source.root_path);
@@ -179,6 +226,8 @@ pub fn run() {
             list_sources,
             add_source,
             start_scan,
+            cancel_scan,
+            remove_source,
             query_media,
             list_extensions,
             ensure_thumbnail,
