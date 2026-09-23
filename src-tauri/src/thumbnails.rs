@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use image::{GenericImageView, ImageFormat};
+use image::{DynamicImage, GenericImageView, ImageDecoder, ImageFormat};
 
 use crate::db::{self, AppState};
 
@@ -50,11 +50,18 @@ pub fn ensure_thumbnail(state: &AppState, media_id: i64) -> Result<String> {
     }
 
     let result = (|| -> Result<(u32, u32)> {
-        let image = image::ImageReader::open(&source_path)
+        let reader = image::ImageReader::open(&source_path)
             .with_context(|| format!("failed to open {}", source_path.display()))?
-            .with_guessed_format()?
-            .decode()
+            .with_guessed_format()?;
+        let mut decoder = reader
+            .into_decoder()
+            .with_context(|| format!("failed to create decoder for {}", source_path.display()))?;
+        let orientation = decoder
+            .orientation()
+            .unwrap_or(image::metadata::Orientation::NoTransforms);
+        let mut image = DynamicImage::from_decoder(decoder)
             .with_context(|| format!("failed to decode {}", source_path.display()))?;
+        image.apply_orientation(orientation);
 
         let dimensions = image.dimensions();
         let thumbnail = image.thumbnail(THUMBNAIL_EDGE, THUMBNAIL_EDGE);
