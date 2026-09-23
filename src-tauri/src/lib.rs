@@ -195,12 +195,7 @@ async fn ensure_thumbnail(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn open_media_external(
-    media_id: i64,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+fn validated_media_path(state: &AppState, media_id: i64) -> Result<PathBuf, String> {
     let media = db::media_path(&state.db_path, media_id).map_err(|error| error.to_string())?;
     let root = fs::canonicalize(&media.root_path)
         .map_err(|_| "A fonte desta mídia está offline ou indisponível.".to_string())?;
@@ -211,9 +206,77 @@ fn open_media_external(
         return Err("O caminho da mídia saiu da fonte cadastrada.".into());
     }
 
+    Ok(full)
+}
+
+fn directory_size(path: &std::path::Path) -> u64 {
+    if !path.is_dir() {
+        return 0;
+    }
+
+    walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| entry.metadata().ok())
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+#[tauri::command]
+fn open_media_external(
+    media_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let full = validated_media_path(state.inner(), media_id)?;
+
     app.opener()
         .open_path(full.to_string_lossy().into_owned(), None::<&str>)
         .map_err(|error| format!("Não foi possível abrir no aplicativo padrão: {error}"))
+}
+
+#[tauri::command]
+fn reveal_media_in_folder(
+    media_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let full = validated_media_path(state.inner(), media_id)?;
+    app.opener()
+        .reveal_item_in_dir(full.to_string_lossy().into_owned())
+        .map_err(|error| format!("Não foi possível mostrar o arquivo no Explorer: {error}"))
+}
+
+#[tauri::command]
+fn media_full_path(
+    media_id: i64,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    validated_media_path(state.inner(), media_id)
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn cache_size(state: State<'_, AppState>) -> u64 {
+    directory_size(&state.cache_dir)
+}
+
+#[tauri::command]
+fn clear_thumbnail_cache(state: State<'_, AppState>) -> Result<u64, String> {
+    let thumbnail_dir = state.cache_dir.join("thumbnails");
+    let previous_size = directory_size(&thumbnail_dir);
+
+    if thumbnail_dir.exists() {
+        fs::remove_dir_all(&thumbnail_dir)
+            .map_err(|error| format!("Não foi possível limpar o cache: {error}"))?;
+    }
+    fs::create_dir_all(&thumbnail_dir)
+        .map_err(|error| format!("Não foi possível recriar o cache: {error}"))?;
+    db::reset_thumbnail_states(&state.db_path).map_err(|error| error.to_string())?;
+
+    Ok(previous_size)
 }
 
 #[tauri::command]
@@ -280,6 +343,10 @@ pub fn run() {
             list_extensions,
             ensure_thumbnail,
             open_media_external,
+            reveal_media_in_folder,
+            media_full_path,
+            cache_size,
+            clear_thumbnail_cache,
             media_asset_path
         ])
         .run(tauri::generate_context!())
