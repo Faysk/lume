@@ -51,11 +51,12 @@ button {
 }
 
 .app-shell {
-  display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
 .app-header {
@@ -275,6 +276,8 @@ button {
 }
 
 .library-main {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -1121,4 +1124,9 @@ button {
   .search-control {
     flex: 0 0 220px;
   }
+}
+
+
+.viewer-backdrop:focus {
+  outline: none;
 }
