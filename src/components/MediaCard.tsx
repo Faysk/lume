@@ -7,6 +7,7 @@ interface MediaCardProps {
   thumbnail?: string;
   onNeedThumbnail: (item: MediaItem) => void;
   onOpen: (item: MediaItem) => void;
+  selected?: boolean;
 }
 
 function formatBytes(value: number): string {
@@ -21,6 +22,7 @@ export function MediaCard({
   thumbnail,
   onNeedThumbnail,
   onOpen,
+  selected = false,
 }: MediaCardProps) {
   useEffect(() => {
     if (item.mediaType === "image" && !thumbnail) {
@@ -30,7 +32,7 @@ export function MediaCard({
 
   return (
     <button
-      className="media-card"
+      className={`media-card${selected ? " media-card-selected" : ""}`}
       type="button"
       onClick={() => onOpen(item)}
       title={item.fileName}
