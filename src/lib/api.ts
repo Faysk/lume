@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import type { MediaPage, MediaQuery, Source } from "./types";
+import type { MediaPage, MediaQuery, Source, UiPreferences } from "./types";
 
 export async function chooseSourceDirectory(): Promise<string | null> {
   const selected = await open({
@@ -11,6 +11,16 @@ export async function chooseSourceDirectory(): Promise<string | null> {
   });
 
   return typeof selected === "string" ? selected : null;
+}
+
+export function getUiPreferences(): Promise<UiPreferences> {
+  return invoke<UiPreferences>("get_ui_preferences");
+}
+
+export function saveUiPreferences(
+  preferences: UiPreferences,
+): Promise<UiPreferences> {
+  return invoke<UiPreferences>("save_ui_preferences", { preferences });
 }
 
 export function listSources(): Promise<Source[]> {
