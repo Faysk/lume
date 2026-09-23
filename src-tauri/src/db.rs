@@ -82,6 +82,12 @@ pub fn init_database(path: &Path) -> Result<()> {
             .context("failed to apply migration 0002_scan_reconciliation")?;
     }
 
+    if current_version < 3 {
+        connection
+            .execute_batch(include_str!("../migrations/0003_query_indexes.sql"))
+            .context("failed to apply migration 0003_query_indexes")?;
+    }
+
     Ok(())
 }
 
@@ -721,7 +727,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         assert_eq!(present, 1);
         drop(connection);
         fs::remove_dir_all(root).unwrap();
@@ -742,7 +748,7 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal mode should be readable");
 
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
 
         drop(connection);
@@ -1025,8 +1031,8 @@ mod tests {
 
 
     #[test]
-    #[ignore = "manual 100k catalog smoke fixture"]
-    fn catalog_100k_fixture_stays_paginated() {
+    #[ignore = "manual 250k catalog benchmark fixture"]
+    fn catalog_250k_fixture_stays_paginated() {
         use std::time::Instant;
 
         let (db_path, root) = temporary_catalog();
@@ -1034,7 +1040,7 @@ mod tests {
         let source = insert_or_get_source(&db_path, r"E:\Synthetic-100k", "Synthetic 100k")
             .expect("source should be inserted");
 
-        const TOTAL: usize = 100_000;
+        const TOTAL: usize = 250_000;
         const BATCH: usize = 1_000;
 
         for start in (0..TOTAL).step_by(BATCH) {
@@ -1066,11 +1072,38 @@ mod tests {
         assert_eq!(page.limit, 240);
 
         println!(
-            "100k catalog page: {} items in {:?}",
+            "250k catalog page: {} items in {:?}",
             page.items.len(),
             elapsed
         );
 
+        let connection = open(&db_path).expect("catalog should reopen");
+        connection.execute_batch("ANALYZE").expect("analyze should succeed");
+
+        for (label, sql) in [
+            (
+                "type",
+                "EXPLAIN QUERY PLAN SELECT id FROM media WHERE is_present = 1 AND media_type = 'image' ORDER BY id LIMIT 240",
+            ),
+            (
+                "date",
+                "EXPLAIN QUERY PLAN SELECT id FROM media WHERE is_present = 1 ORDER BY COALESCE(modified_at_fs, created_at_fs, 0) DESC, id DESC LIMIT 240",
+            ),
+            (
+                "size",
+                "EXPLAIN QUERY PLAN SELECT id FROM media WHERE is_present = 1 ORDER BY size_bytes DESC, id DESC LIMIT 240",
+            ),
+        ] {
+            let mut statement = connection.prepare(sql).unwrap();
+            let details = statement
+                .query_map([], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            println!("query-plan {label}: {}", details.join(" | "));
+        }
+
+        drop(connection);
         fs::remove_dir_all(root).expect("temporary catalog should be removable");
     }
 
