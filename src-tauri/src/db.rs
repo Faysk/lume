@@ -649,6 +649,48 @@ mod tests {
     }
 
     #[test]
+    fn version_one_catalog_upgrades_without_losing_media() {
+        let (db_path, root) = temporary_catalog();
+        let connection = open(&db_path).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0001_initial.sql"))
+            .unwrap();
+        connection.execute(
+            "INSERT INTO sources(root_path, display_name) VALUES (?1, ?2)",
+            params![r"C:\Legacy", "Legacy"],
+        ).unwrap();
+        let source_id = connection.last_insert_rowid();
+        connection.execute(
+            "
+            INSERT INTO media(
+                source_id, relative_path, file_name, extension, media_type,
+                size_bytes, created_at_fs, modified_at_fs
+            ) VALUES (?1, 'old.jpg', 'old.jpg', 'jpg', 'image', 10, 1, 1)
+            ",
+            params![source_id],
+        ).unwrap();
+        drop(connection);
+
+        init_database(&db_path).expect("v1 catalog should upgrade to v2");
+        let connection = open(&db_path).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        let present: i64 = connection
+            .query_row(
+                "SELECT is_present FROM media WHERE file_name = 'old.jpg'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(version, 2);
+        assert_eq!(present, 1);
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn migration_is_idempotent_and_sets_version() {
         let (db_path, root) = temporary_catalog();
 
@@ -789,6 +831,32 @@ mod tests {
         assert_eq!(page.items[0].file_name, "keep.jpg");
 
         fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
+    #[test]
+    fn removing_source_only_removes_catalog_rows() {
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).unwrap();
+        let source = insert_or_get_source(&db_path, r"C:\Remove", "Remove").unwrap();
+        upsert_media_batch(
+            &db_path,
+            source.id,
+            &[DiscoveredMedia {
+                relative_path: "keep-on-disk.jpg".into(),
+                file_name: "keep-on-disk.jpg".into(),
+                extension: "jpg".into(),
+                media_type: "image".into(),
+                size_bytes: 10,
+                created_at_fs: Some(1),
+                modified_at_fs: Some(1),
+            }],
+        ).unwrap();
+
+        assert!(remove_source(&db_path, source.id).unwrap());
+        assert_eq!(query_media(&db_path, 0, 50).unwrap().total, 0);
+        assert!(list_sources(&db_path).unwrap().is_empty());
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
