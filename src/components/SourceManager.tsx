@@ -11,6 +11,7 @@ interface SourceManagerProps {
   cacheBytes: number;
   clearingCache: boolean;
   onClearCache: () => void;
+  onOpenLogs: () => void;
 }
 
 function formatBytes(value: number): string {
@@ -44,6 +45,7 @@ export function SourceManager({
   cacheBytes,
   clearingCache,
   onClearCache,
+  onOpenLogs,
 }: SourceManagerProps) {
   return (
     <div className="source-manager-backdrop" role="presentation" onMouseDown={onClose}>
@@ -133,6 +135,13 @@ export function SourceManager({
                 onClick={onClearCache}
               >
                 {clearingCache ? "Limpando…" : "Limpar cache"}
+              </button>
+              <button
+                className="cache-clear-button"
+                type="button"
+                onClick={onOpenLogs}
+              >
+                Abrir logs
               </button>
             </span>
           </div>
