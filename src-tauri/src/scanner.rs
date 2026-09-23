@@ -229,6 +229,46 @@ pub fn run_scan(
         return Ok(());
     }
 
+    if !root.is_dir() {
+        db::mark_source_offline(&state.db_path, source_id)?;
+        emit_progress(
+            &app,
+            ScanProgress {
+                source_id,
+                discovered,
+                supported,
+                errors: errors + 1,
+                done: true,
+                cancelled: false,
+                message: Some(
+                    "A fonte ficou indisponível durante a varredura. O catálogo anterior foi preservado."
+                        .into(),
+                ),
+            },
+        );
+        return Ok(());
+    }
+
+    if errors > 0 {
+        db::mark_scan_partial(&state.db_path, source_id)?;
+        emit_progress(
+            &app,
+            ScanProgress {
+                source_id,
+                discovered,
+                supported,
+                errors,
+                done: true,
+                cancelled: false,
+                message: Some(
+                    "A varredura terminou com erros de acesso. Itens antigos não foram reconciliados."
+                        .into(),
+                ),
+            },
+        );
+        return Ok(());
+    }
+
     db::finish_scan_and_reconcile(&state.db_path, source_id, generation)?;
 
     emit_progress(
