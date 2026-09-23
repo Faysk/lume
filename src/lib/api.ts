@@ -25,6 +25,14 @@ export function startScan(sourceId: number): Promise<boolean> {
   return invoke<boolean>("start_scan", { sourceId });
 }
 
+export function cancelScan(sourceId: number): Promise<boolean> {
+  return invoke<boolean>("cancel_scan", { sourceId });
+}
+
+export function removeSource(sourceId: number): Promise<boolean> {
+  return invoke<boolean>("remove_source", { sourceId });
+}
+
 export function queryMedia(query: MediaQuery): Promise<MediaPage> {
   return invoke<MediaPage>("query_media", { query });
 }
