@@ -41,7 +41,7 @@ function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
   const thumbnailAttempts = useRef(new Set<number>());
-  const refreshTimer = useRef<number>();
+  const refreshTimer = useRef<number | undefined>(undefined);
 
   const loadSources = useCallback(async () => {
     const next = await listSources();
