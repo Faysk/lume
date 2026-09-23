@@ -12,6 +12,7 @@ use crate::models::{MediaItem, MediaPage, MediaQuery, Source, UiPreferences};
 pub struct AppState {
     pub db_path: PathBuf,
     pub cache_dir: PathBuf,
+    pub log_path: PathBuf,
     pub scanning: Arc<
         Mutex<
             std::collections::HashMap<
@@ -24,9 +25,15 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db_path: PathBuf, cache_dir: PathBuf) -> Self {
+        let log_path = db_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("logs")
+            .join("lume.log");
         Self {
             db_path,
             cache_dir,
+            log_path,
             scanning: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
