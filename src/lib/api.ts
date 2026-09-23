@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import type { MediaPage, Source } from "./types";
+import type { MediaPage, MediaQuery, Source } from "./types";
 
 export async function chooseSourceDirectory(): Promise<string | null> {
   const selected = await open({
@@ -25,8 +25,12 @@ export function startScan(sourceId: number): Promise<boolean> {
   return invoke<boolean>("start_scan", { sourceId });
 }
 
-export function queryMedia(offset: number, limit: number): Promise<MediaPage> {
-  return invoke<MediaPage>("query_media", { offset, limit });
+export function queryMedia(query: MediaQuery): Promise<MediaPage> {
+  return invoke<MediaPage>("query_media", { query });
+}
+
+export function listExtensions(): Promise<string[]> {
+  return invoke<string[]>("list_extensions");
 }
 
 export async function thumbnailUrl(mediaId: number): Promise<string> {
