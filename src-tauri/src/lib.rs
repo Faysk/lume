@@ -199,7 +199,7 @@ fn open_media_external(
     }
 
     app.opener()
-        .open_path(&full, None::<&str>)
+        .open_path(full.to_string_lossy().into_owned(), None::<&str>)
         .map_err(|error| format!("Não foi possível abrir no aplicativo padrão: {error}"))
 }
 
