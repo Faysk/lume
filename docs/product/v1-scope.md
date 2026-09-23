@@ -157,7 +157,6 @@ Ao reabrir:
 
 Explicitamente fora:
 
-- IA, embeddings, OCR, reconhecimento facial e transcrição;
 - deduplicação e SHA-256 global;
 - favoritos, coleções e tags;
 - timeline avançada e mapa;
