@@ -61,7 +61,7 @@ export function MediaGrid({
   }, [columns, estimatedRowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
-  const lastRow = virtualRows.at(-1)?.index ?? 0;
+  const lastRow = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1].index : 0;
 
   useEffect(() => {
     if (hasMore && !loadingMore && rowCount > 0 && lastRow >= rowCount - 3) {
