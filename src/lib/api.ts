@@ -41,6 +41,14 @@ export function listExtensions(): Promise<string[]> {
   return invoke<string[]>("list_extensions");
 }
 
+export function getMediaItem(mediaId: number): Promise<import("./types").MediaItem> {
+  return invoke<import("./types").MediaItem>("get_media_item", { mediaId });
+}
+
+export function openMediaExternal(mediaId: number): Promise<void> {
+  return invoke<void>("open_media_external", { mediaId });
+}
+
 export async function thumbnailUrl(mediaId: number): Promise<string> {
   const path = await invoke<string>("ensure_thumbnail", { mediaId });
   return convertFileSrc(path);
