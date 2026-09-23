@@ -14,6 +14,7 @@ use std::{
 
 use models::{MediaPage, MediaQuery, ScanProgress, Source};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::AppState;
@@ -238,6 +239,31 @@ fn open_media_external(
 }
 
 #[tauri::command]
+fn copy_media_name(
+    media_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let media = db::get_media_item(&state.db_path, media_id)
+        .map_err(|error| error.to_string())?;
+    app.clipboard()
+        .write_text(media.file_name)
+        .map_err(|error| format!("Não foi possível copiar o nome: {error}"))
+}
+
+#[tauri::command]
+fn copy_media_path(
+    media_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let full = validated_media_path(state.inner(), media_id)?;
+    app.clipboard()
+        .write_text(full.to_string_lossy().into_owned())
+        .map_err(|error| format!("Não foi possível copiar o caminho: {error}"))
+}
+
+#[tauri::command]
 fn reveal_media_in_folder(
     media_id: i64,
     app: AppHandle,
@@ -306,6 +332,7 @@ fn media_asset_path(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
@@ -343,6 +370,8 @@ pub fn run() {
             list_extensions,
             ensure_thumbnail,
             open_media_external,
+            copy_media_name,
+            copy_media_path,
             reveal_media_in_folder,
             media_full_path,
             cache_size,
