@@ -105,16 +105,6 @@ pub fn init_database(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn add_source(path: &Path, display_name: &str) -> Result<Source> {
-    let connection = open(path_for_db(path)?)?;
-    drop(connection);
-    unreachable!("add_source(path, display_name) must not be called without db path")
-}
-
-fn path_for_db(_source_path: &Path) -> Result<&Path> {
-    anyhow::bail!("internal misuse")
-}
-
 pub fn insert_or_get_source(db_path: &Path, root_path: &str, display_name: &str) -> Result<Source> {
     let connection = open(db_path)?;
 
