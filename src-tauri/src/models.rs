@@ -65,5 +65,6 @@ pub struct ScanProgress {
     pub supported: u64,
     pub errors: u64,
     pub done: bool,
+    pub cancelled: bool,
     pub message: Option<String>,
 }
