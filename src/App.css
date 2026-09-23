@@ -184,22 +184,43 @@ button {
 }
 
 .source-pill {
-  flex: 0 0 auto;
-  gap: 7px;
-  min-height: 30px;
-  padding: 0 10px;
+  flex: 0 1 420px;
+  gap: 9px;
+  min-width: 220px;
+  min-height: 42px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 13px;
   background: rgba(255, 255, 255, 0.025);
   font-size: 12px;
 }
 
-.source-pill strong {
-  font-weight: 680;
+.source-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
 }
 
-.source-pill > span:last-child {
+.source-pill strong {
+  overflow: hidden;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-path {
+  overflow: hidden;
+  max-width: 260px;
+  color: var(--soft);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-state {
+  margin-left: auto;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .status-dot {
