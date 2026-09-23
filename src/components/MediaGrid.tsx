@@ -12,9 +12,10 @@ interface MediaGridProps {
   onNeedThumbnail: (item: MediaItem) => void;
   onOpen: (item: MediaItem) => void;
   onEndReached: () => void;
+  selectedId?: number;
+  minCardWidth: number;
 }
 
-const MIN_CARD_WIDTH = 188;
 const GAP = 14;
 
 export function MediaGrid({
@@ -25,6 +26,8 @@ export function MediaGrid({
   onNeedThumbnail,
   onOpen,
   onEndReached,
+  selectedId,
+  minCardWidth,
 }: MediaGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
@@ -41,7 +44,7 @@ export function MediaGrid({
     return () => observer.disconnect();
   }, []);
 
-  const columns = Math.max(1, Math.floor((width + GAP) / (MIN_CARD_WIDTH + GAP)));
+  const columns = Math.max(1, Math.floor((width + GAP) / (minCardWidth + GAP)));
   const cardWidth = Math.max(
     120,
     (width - GAP * Math.max(0, columns - 1) - 24) / columns,
@@ -103,6 +106,7 @@ export function MediaGrid({
                 thumbnail={thumbnails.get(item.id)}
                 onNeedThumbnail={onNeedThumbnail}
                 onOpen={onOpen}
+                selected={selectedId === item.id}
               />
             ))}
           </div>
