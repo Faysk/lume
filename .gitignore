@@ -1,0 +1,29 @@
+# Node / frontend
+node_modules/
+dist/
+.vite/
+coverage/
+
+# Rust / Tauri
+target/
+src-tauri/target/
+
+# Local app data and test output
+*.db
+*.db-shm
+*.db-wal
+cache/
+artifacts/
+tmp/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
