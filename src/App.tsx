@@ -5,13 +5,16 @@ import "./App.css";
 import { LibraryToolbar } from "./components/LibraryToolbar";
 import { MediaGrid } from "./components/MediaGrid";
 import { MediaList } from "./components/MediaList";
+import { SourceManager } from "./components/SourceManager";
 import { Viewer } from "./components/Viewer";
 import {
   addSource,
+  cancelScan,
   chooseSourceDirectory,
   listExtensions,
   listSources,
   queryMedia,
+  removeSource,
   startScan,
   thumbnailUrl,
 } from "./lib/api";
@@ -73,6 +76,7 @@ function App() {
   const [addingSource, setAddingSource] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
+  const [sourceManagerOpen, setSourceManagerOpen] = useState(false);
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -263,6 +267,63 @@ function App() {
     }
   }, []);
 
+  const handleRescan = useCallback(async (sourceId: number) => {
+    setError(undefined);
+
+    try {
+      const started = await startScan(sourceId);
+      if (!started) {
+        setError("Essa fonte já está sendo escaneada.");
+        return;
+      }
+
+      setSources((current) =>
+        current.map((source) =>
+          source.id === sourceId ? { ...source, status: "scanning" } : source,
+        ),
+      );
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }, []);
+
+  const handleCancelScan = useCallback(async (sourceId: number) => {
+    try {
+      const requested = await cancelScan(sourceId);
+      if (!requested) {
+        setError("Essa fonte não possui uma varredura ativa.");
+      }
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }, []);
+
+  const handleRemoveSource = useCallback(
+    async (source: Source) => {
+      const confirmed = window.confirm(
+        `Remover "${source.displayName}" do catálogo do Lume?\n\nOs arquivos físicos não serão apagados.`,
+      );
+      if (!confirmed) return;
+
+      try {
+        await removeSource(source.id);
+        setSelectedSourceIds((current) =>
+          current.filter((sourceId) => sourceId !== source.id),
+        );
+        setScanProgress((current) => {
+          const next = new Map(current);
+          next.delete(source.id);
+          return next;
+        });
+        await loadSourcesAndExtensions();
+        await refreshMedia();
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    },
+    [loadSourcesAndExtensions, refreshMedia],
+  );
+
   const handleNeedThumbnail = useCallback(async (item: MediaItem) => {
     if (thumbnailAttempts.current.has(item.id)) return;
     thumbnailAttempts.current.add(item.id);
@@ -375,6 +436,15 @@ function App() {
         </div>
 
         <div className="header-actions">
+          {hasSources ? (
+            <button
+              className="toolbar-ghost-button header-source-button"
+              type="button"
+              onClick={() => setSourceManagerOpen(true)}
+            >
+              Fontes · {sources.length}
+            </button>
+          ) : null}
           {total > 0 ? (
             <span className="library-count">
               {total.toLocaleString("pt-PT")} {total === 1 ? "mídia" : "mídias"}
@@ -562,6 +632,18 @@ function App() {
           onPrevious={openPrevious}
           onNext={openNext}
           onClose={() => setSelectedId(undefined)}
+        />
+      ) : null}
+
+      {sourceManagerOpen ? (
+        <SourceManager
+          sources={sources}
+          scanProgress={scanProgress}
+          onClose={() => setSourceManagerOpen(false)}
+          onAdd={() => void handleAddSource()}
+          onRescan={(sourceId) => void handleRescan(sourceId)}
+          onCancel={(sourceId) => void handleCancelScan(sourceId)}
+          onRemove={(source) => void handleRemoveSource(source)}
         />
       ) : null}
     </div>
