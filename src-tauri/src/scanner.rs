@@ -130,6 +130,21 @@ pub fn run_scan(
 
         discovered += 1;
 
+        if discovered % 256 == 0 {
+            emit_progress(
+                &app,
+                ScanProgress {
+                    source_id,
+                    discovered,
+                    supported,
+                    errors,
+                    done: false,
+                    cancelled: false,
+                    message: None,
+                },
+            );
+        }
+
         let path = entry.path();
         let extension = path
             .extension()
