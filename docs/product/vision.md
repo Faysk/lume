@@ -43,7 +43,7 @@ O produto não depende de uma organização prévia perfeita dos diretórios.
 
 ## O que Lume não é
 
-Na V1, Lume não é backup, DAM profissional, editor, ferramenta de migração, organizador físico automático, serviço em nuvem, servidor doméstico ou plataforma de IA.
+Na V1, Lume não é backup, DAM profissional, editor, ferramenta de migração, organizador físico automático, serviço em nuvem ou servidor doméstico.
 
 ## Norte de UX
 
