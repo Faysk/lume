@@ -461,4 +461,55 @@ mod tests {
 
         fs::remove_dir_all(root).expect("temporary catalog should be removable");
     }
+
+    #[test]
+    #[ignore = "manual 100k catalog smoke fixture"]
+    fn catalog_100k_fixture_stays_paginated() {
+        use std::time::Instant;
+
+        let (db_path, root) = temporary_catalog();
+        init_database(&db_path).expect("migration should succeed");
+        let source = insert_or_get_source(&db_path, r"E:\Synthetic-100k", "Synthetic 100k")
+            .expect("source should be inserted");
+
+        const TOTAL: usize = 100_000;
+        const BATCH: usize = 1_000;
+
+        for start in (0..TOTAL).step_by(BATCH) {
+            let end = (start + BATCH).min(TOTAL);
+            let items = (start..end)
+                .map(|index| DiscoveredMedia {
+                    relative_path: format!("folder/{index:06}.jpg"),
+                    file_name: format!("{index:06}.jpg"),
+                    extension: "jpg".into(),
+                    media_type: "image".into(),
+                    size_bytes: 1_024 + index as i64,
+                    created_at_fs: Some(index as i64),
+                    modified_at_fs: Some(index as i64),
+                })
+                .collect::<Vec<_>>();
+
+            upsert_media_batch(&db_path, source.id, &items)
+                .expect("synthetic batch should persist");
+        }
+
+        let started = Instant::now();
+        let page = query_media(&db_path, 50_000, 240)
+            .expect("bounded page should load from large fixture");
+        let elapsed = started.elapsed();
+
+        assert_eq!(page.total, TOTAL as i64);
+        assert_eq!(page.items.len(), 240);
+        assert_eq!(page.offset, 50_000);
+        assert_eq!(page.limit, 240);
+
+        println!(
+            "100k catalog page: {} items in {:?}",
+            page.items.len(),
+            elapsed
+        );
+
+        fs::remove_dir_all(root).expect("temporary catalog should be removable");
+    }
+
 }

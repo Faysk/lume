@@ -14,19 +14,25 @@ jobs:
   validate:
     name: Validate Windows build
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
 
       - name: Install frontend dependencies
         run: npm install
@@ -39,3 +45,16 @@ jobs:
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build testable Windows executable
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[artifact]')
+        run: npm run tauri:build -- --no-bundle
+
+      - name: Upload Windows executable
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[artifact]')
+        uses: actions/upload-artifact@v4
+        with:
+          name: lume-0.1-windows-${{ github.sha }}
+          path: src-tauri/target/release/lume.exe
+          if-no-files-found: error
+          retention-days: 14
