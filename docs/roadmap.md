@@ -118,4 +118,4 @@ Candidatos, sem compromisso de ordem:
 - drag-and-drop de fontes;
 - rede local.
 
-IA não tem versão reservada. Ela só entra quando existir um produto básico suficientemente bom para continuar útil com IA desligada.
+Nada desta seção faz parte do compromisso da V1.
