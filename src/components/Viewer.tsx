@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../lib/api";
 import type { MediaItem } from "../lib/types";
@@ -22,6 +22,7 @@ export function Viewer({
 }: ViewerProps) {
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState<string>();
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -44,12 +45,18 @@ export function Viewer({
   }, [item.id]);
 
   useEffect(() => {
+    dialogRef.current?.focus();
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
+      } else if (event.target instanceof HTMLVideoElement) {
+        return;
       } else if (event.key === "ArrowLeft" && canPrevious) {
+        event.preventDefault();
         onPrevious();
       } else if (event.key === "ArrowRight" && canNext) {
+        event.preventDefault();
         onNext();
       }
     };
@@ -59,7 +66,14 @@ export function Viewer({
   }, [canNext, canPrevious, onClose, onNext, onPrevious]);
 
   return (
-    <div className="viewer-backdrop" role="dialog" aria-modal="true" aria-label={item.fileName}>
+    <div
+      ref={dialogRef}
+      className="viewer-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={item.fileName}
+      tabIndex={-1}
+    >
       <header className="viewer-header">
         <div className="viewer-title">
           <strong>{item.fileName}</strong>
