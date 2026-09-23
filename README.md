@@ -4,7 +4,7 @@
 
 Lume é um visualizador local-first para reunir fotos, vídeos e GIFs espalhados por discos e pastas em uma única biblioteca visual, sem reorganizar, mover, renomear ou importar os arquivos originais.
 
-O produto nasce de uma regra simples: **primeiro ser útil, depois ser inteligente**.
+O produto nasce de uma regra simples: **resolver muito bem o problema principal antes de aumentar o escopo**.
 
 ## Estado
 
@@ -35,7 +35,7 @@ Selecionar uma ou mais fontes locais e começar a navegar pelas mídias imediata
 
 ### Não entra na V1
 
-IA, embeddings, reconhecimento facial, busca semântica, ASR, deduplicação, hashing global, reorganização física, importação, backup, cloud, login, compartilhamento de rede, app móvel, edição e supervisor complexo de jobs.
+Deduplicação, hashing global, reorganização física, importação, backup, cloud, login, compartilhamento de rede, app móvel, edição e supervisor complexo de jobs.
 
 Se uma funcionalidade não ajuda diretamente o fluxo **abrir → adicionar fonte → ver mídia → filtrar → abrir → navegar**, ela provavelmente não pertence à V1.
 
@@ -49,8 +49,7 @@ Se uma funcionalidade não ajuda diretamente o fluxo **abrir → adicionar fonte
 6. Cache é descartável e nunca é a única cópia de nada.
 7. O catálogo pode ser reconstruído a partir das fontes.
 8. Uma aplicação, um processo principal, um banco.
-9. Sem IA até a experiência básica estar excelente.
-10. Toda nova complexidade precisa justificar o problema real que resolve.
+9. Toda nova complexidade precisa justificar o problema real que resolve.
 
 ## Stack proposta
 
