@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  copyMediaName,
+  copyMediaPath,
   getMediaItem,
   mediaUrl,
   openMediaExternal,
+  revealMediaInFolder,
   thumbnailUrl,
 } from "../lib/api";
 import type { MediaItem } from "../lib/types";
@@ -49,6 +52,7 @@ export function Viewer({
   const [error, setError] = useState<string>();
   const [details, setDetails] = useState(item);
   const [showInfo, setShowInfo] = useState(false);
+  const [feedback, setFeedback] = useState<string>();
   const [zoom, setZoom] = useState(1);
   const [actualSize, setActualSize] = useState(false);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
@@ -62,6 +66,7 @@ export function Viewer({
     setUrl(undefined);
     setError(undefined);
     setDetails(item);
+    setFeedback(undefined);
     setZoom(1);
     setActualSize(false);
     setPan({ x: 0, y: 0 });
@@ -131,6 +136,21 @@ export function Viewer({
 
   const imageCanPan = item.mediaType === "image" && (actualSize || zoom > 1);
 
+  const runAction = async (
+    action: () => Promise<void>,
+    successMessage: string,
+  ) => {
+    setError(undefined);
+    try {
+      await action();
+      setFeedback(successMessage);
+      window.setTimeout(() => setFeedback(undefined), 1600);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+
   return (
     <div
       ref={dialogRef}
@@ -179,9 +199,21 @@ export function Viewer({
           <button
             type="button"
             onClick={() =>
-              void openMediaExternal(item.id).catch((reason: unknown) => {
-                setError(reason instanceof Error ? reason.message : String(reason));
-              })
+              void runAction(
+                () => revealMediaInFolder(item.id),
+                "Arquivo selecionado no Explorer",
+              )
+            }
+          >
+            Explorer
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void runAction(
+                () => openMediaExternal(item.id),
+                "Aberto no aplicativo padrão",
+              )
             }
           >
             Abrir fora
@@ -324,12 +356,37 @@ export function Viewer({
                 <dd>{details.relativePath}</dd>
               </div>
             </dl>
+
+            <div className="viewer-info-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction(
+                    () => copyMediaName(item.id),
+                    "Nome copiado",
+                  )
+                }
+              >
+                Copiar nome
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction(
+                    () => copyMediaPath(item.id),
+                    "Caminho copiado",
+                  )
+                }
+              >
+                Copiar caminho
+              </button>
+            </div>
           </aside>
         ) : null}
       </div>
 
       <footer className="viewer-footer">
-        <span>{item.relativePath}</span>
+        <span>{feedback ?? item.relativePath}</span>
         <span>{item.extension.toUpperCase()}</span>
       </footer>
     </div>
