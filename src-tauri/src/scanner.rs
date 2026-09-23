@@ -1,5 +1,9 @@
 use std::{
     path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -33,15 +37,62 @@ fn emit_progress(app: &AppHandle, progress: ScanProgress) {
     let _ = app.emit("scan-progress", progress);
 }
 
-pub fn run_scan(app: AppHandle, state: AppState, source_id: i64) -> Result<()> {
+fn cancelled(
+    app: &AppHandle,
+    state: &AppState,
+    source_id: i64,
+    cancel: &AtomicBool,
+    discovered: u64,
+    supported: u64,
+    errors: u64,
+) -> Result<bool> {
+    if !cancel.load(Ordering::Relaxed) {
+        return Ok(false);
+    }
+
+    db::mark_scan_cancelled(&state.db_path, source_id)?;
+    emit_progress(
+        app,
+        ScanProgress {
+            source_id,
+            discovered,
+            supported,
+            errors,
+            done: true,
+            cancelled: true,
+            message: Some("Varredura cancelada. O catálogo anterior foi preservado.".into()),
+        },
+    );
+    Ok(true)
+}
+
+pub fn run_scan(
+    app: AppHandle,
+    state: AppState,
+    source_id: i64,
+    cancel: Arc<AtomicBool>,
+) -> Result<()> {
     let source = db::get_source(&state.db_path, source_id)?;
     let root = Path::new(&source.root_path);
 
     if !root.is_dir() {
-        anyhow::bail!("source is not available: {}", source.root_path);
+        db::mark_source_offline(&state.db_path, source_id)?;
+        emit_progress(
+            &app,
+            ScanProgress {
+                source_id,
+                discovered: 0,
+                supported: 0,
+                errors: 0,
+                done: true,
+                cancelled: false,
+                message: Some("A fonte não está disponível neste momento.".into()),
+            },
+        );
+        return Ok(());
     }
 
-    db::mark_scan_started(&state.db_path, source_id)?;
+    let generation = db::mark_scan_started(&state.db_path, source_id)?;
 
     let mut discovered = 0_u64;
     let mut supported = 0_u64;
@@ -53,6 +104,18 @@ pub fn run_scan(app: AppHandle, state: AppState, source_id: i64) -> Result<()> {
         .same_file_system(false)
         .into_iter()
     {
+        if cancelled(
+            &app,
+            &state,
+            source_id,
+            &cancel,
+            discovered,
+            supported,
+            errors,
+        )? {
+            return Ok(());
+        }
+
         let entry = match entry {
             Ok(entry) => entry,
             Err(_) => {
@@ -111,7 +174,12 @@ pub fn run_scan(app: AppHandle, state: AppState, source_id: i64) -> Result<()> {
         });
 
         if batch.len() >= BATCH_SIZE {
-            db::upsert_media_batch(&state.db_path, source_id, &batch)?;
+            db::upsert_media_batch_for_scan(
+                &state.db_path,
+                source_id,
+                generation,
+                &batch,
+            )?;
             batch.clear();
 
             emit_progress(
@@ -122,15 +190,46 @@ pub fn run_scan(app: AppHandle, state: AppState, source_id: i64) -> Result<()> {
                     supported,
                     errors,
                     done: false,
+                    cancelled: false,
                     message: None,
                 },
             );
         }
     }
 
-    db::upsert_media_batch(&state.db_path, source_id, &batch)
-        .context("failed to persist final scan batch")?;
-    db::mark_scan_finished(&state.db_path, source_id)?;
+    if cancelled(
+        &app,
+        &state,
+        source_id,
+        &cancel,
+        discovered,
+        supported,
+        errors,
+    )? {
+        return Ok(());
+    }
+
+    db::upsert_media_batch_for_scan(
+        &state.db_path,
+        source_id,
+        generation,
+        &batch,
+    )
+    .context("failed to persist final scan batch")?;
+
+    if cancelled(
+        &app,
+        &state,
+        source_id,
+        &cancel,
+        discovered,
+        supported,
+        errors,
+    )? {
+        return Ok(());
+    }
+
+    db::finish_scan_and_reconcile(&state.db_path, source_id, generation)?;
 
     emit_progress(
         &app,
@@ -140,13 +239,13 @@ pub fn run_scan(app: AppHandle, state: AppState, source_id: i64) -> Result<()> {
             supported,
             errors,
             done: true,
+            cancelled: false,
             message: None,
         },
     );
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
