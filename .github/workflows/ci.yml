@@ -46,6 +46,10 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: 250k catalog benchmark
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[scale]')
+        run: cargo test --manifest-path src-tauri/Cargo.toml catalog_250k_fixture_stays_paginated -- --ignored --nocapture
+
       - name: Build testable Windows executable
         if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[artifact]')
         run: npm run tauri:build -- --no-bundle
