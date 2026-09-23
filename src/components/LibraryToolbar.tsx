@@ -1,4 +1,4 @@
-import type { MediaSort, Source } from "../lib/types";
+import type { MediaSort, Source, ThemePreference } from "../lib/types";
 
 interface LibraryToolbarProps {
   search: string;
@@ -25,6 +25,8 @@ interface LibraryToolbarProps {
   onViewModeChange: (value: "grid" | "list") => void;
   minCardWidth: number;
   onMinCardWidthChange: (value: number) => void;
+  theme: ThemePreference;
+  onThemeChange: (value: ThemePreference) => void;
   activeFilterCount: number;
   onClearFilters: () => void;
 }
@@ -201,6 +203,20 @@ export function LibraryToolbar(props: LibraryToolbarProps) {
           <span>＋</span>
         </label>
       ) : null}
+
+      <select
+        className="toolbar-select theme-select"
+        value={props.theme}
+        onChange={(event) =>
+          props.onThemeChange(event.currentTarget.value as ThemePreference)
+        }
+        aria-label="Tema"
+        title="Tema"
+      >
+        <option value="system">Tema · Sistema</option>
+        <option value="dark">Tema · Escuro</option>
+        <option value="light">Tema · Claro</option>
+      </select>
 
       <div className="view-toggle" role="group" aria-label="Modo de visualização">
         <button
