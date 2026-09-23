@@ -59,6 +59,26 @@ export function openMediaExternal(mediaId: number): Promise<void> {
   return invoke<void>("open_media_external", { mediaId });
 }
 
+export function revealMediaInFolder(mediaId: number): Promise<void> {
+  return invoke<void>("reveal_media_in_folder", { mediaId });
+}
+
+export function copyMediaName(mediaId: number): Promise<void> {
+  return invoke<void>("copy_media_name", { mediaId });
+}
+
+export function copyMediaPath(mediaId: number): Promise<void> {
+  return invoke<void>("copy_media_path", { mediaId });
+}
+
+export function cacheSize(): Promise<number> {
+  return invoke<number>("cache_size");
+}
+
+export function clearThumbnailCache(): Promise<number> {
+  return invoke<number>("clear_thumbnail_cache");
+}
+
 export async function thumbnailUrl(mediaId: number): Promise<string> {
   const path = await invoke<string>("ensure_thumbnail", { mediaId });
   return convertFileSrc(path);
