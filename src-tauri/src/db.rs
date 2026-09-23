@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 
-use crate::models::{MediaItem, MediaPage, MediaQuery, Source};
+use crate::models::{MediaItem, MediaPage, MediaQuery, Source, UiPreferences};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -86,6 +86,12 @@ pub fn init_database(path: &Path) -> Result<()> {
         connection
             .execute_batch(include_str!("../migrations/0003_query_indexes.sql"))
             .context("failed to apply migration 0003_query_indexes")?;
+    }
+
+    if current_version < 4 {
+        connection
+            .execute_batch(include_str!("../migrations/0004_settings.sql"))
+            .context("failed to apply migration 0004_settings")?;
     }
 
     Ok(())
@@ -180,6 +186,40 @@ pub fn list_sources(db_path: &Path) -> Result<Vec<Source>> {
 
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to read sources")
+}
+
+pub fn get_ui_preferences(db_path: &Path) -> Result<UiPreferences> {
+    let connection = open(db_path)?;
+    let stored = connection.query_row(
+        "SELECT value FROM settings WHERE key = 'ui.preferences'",
+        [],
+        |row| row.get::<_, String>(0),
+    );
+
+    match stored {
+        Ok(value) => Ok(serde_json::from_str::<UiPreferences>(&value)
+            .unwrap_or_default()
+            .normalized()),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(UiPreferences::default()),
+        Err(error) => Err(error).context("failed to read UI preferences"),
+    }
+}
+
+pub fn save_ui_preferences(db_path: &Path, preferences: UiPreferences) -> Result<UiPreferences> {
+    let preferences = preferences.normalized();
+    let value = serde_json::to_string(&preferences)?;
+    let connection = open(db_path)?;
+    connection.execute(
+        "
+        INSERT INTO settings(key, value, updated_at)
+        VALUES ('ui.preferences', ?1, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        ",
+        params![value],
+    )?;
+    Ok(preferences)
 }
 
 pub fn refresh_source_availability(db_path: &Path) -> Result<()> {
@@ -727,7 +767,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         assert_eq!(present, 1);
         drop(connection);
         fs::remove_dir_all(root).unwrap();
@@ -748,7 +788,7 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal mode should be readable");
 
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
 
         drop(connection);
