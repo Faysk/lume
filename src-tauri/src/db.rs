@@ -66,32 +66,54 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(connection)
 }
 
+fn apply_migration(connection: &mut Connection, name: &str, sql: &str) -> Result<()> {
+    let transaction = connection
+        .transaction()
+        .with_context(|| format!("failed to begin migration {name}"))?;
+    transaction
+        .execute_batch(sql)
+        .with_context(|| format!("failed to apply migration {name}"))?;
+    transaction
+        .commit()
+        .with_context(|| format!("failed to commit migration {name}"))?;
+    Ok(())
+}
+
 pub fn init_database(path: &Path) -> Result<()> {
-    let connection = open(path)?;
-    let current_version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    let mut connection = open(path)?;
+    let current_version: i64 =
+        connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
     if current_version < 1 {
-        connection
-            .execute_batch(include_str!("../migrations/0001_initial.sql"))
-            .context("failed to apply migration 0001_initial")?;
+        apply_migration(
+            &mut connection,
+            "0001_initial",
+            include_str!("../migrations/0001_initial.sql"),
+        )?;
     }
 
     if current_version < 2 {
-        connection
-            .execute_batch(include_str!("../migrations/0002_scan_reconciliation.sql"))
-            .context("failed to apply migration 0002_scan_reconciliation")?;
+        apply_migration(
+            &mut connection,
+            "0002_scan_reconciliation",
+            include_str!("../migrations/0002_scan_reconciliation.sql"),
+        )?;
     }
 
     if current_version < 3 {
-        connection
-            .execute_batch(include_str!("../migrations/0003_query_indexes.sql"))
-            .context("failed to apply migration 0003_query_indexes")?;
+        apply_migration(
+            &mut connection,
+            "0003_query_indexes",
+            include_str!("../migrations/0003_query_indexes.sql"),
+        )?;
     }
 
     if current_version < 4 {
-        connection
-            .execute_batch(include_str!("../migrations/0004_settings.sql"))
-            .context("failed to apply migration 0004_settings")?;
+        apply_migration(
+            &mut connection,
+            "0004_settings",
+            include_str!("../migrations/0004_settings.sql"),
+        )?;
     }
 
     Ok(())
@@ -220,6 +242,19 @@ pub fn save_ui_preferences(db_path: &Path, preferences: UiPreferences) -> Result
         params![value],
     )?;
     Ok(preferences)
+}
+
+pub fn recover_interrupted_scans(db_path: &Path) -> Result<usize> {
+    let connection = open(db_path)?;
+    let affected = connection.execute(
+        "
+        UPDATE sources
+        SET status = 'error'
+        WHERE status = 'scanning'
+        ",
+        [],
+    )?;
+    Ok(affected)
 }
 
 pub fn refresh_source_availability(db_path: &Path) -> Result<()> {
@@ -676,6 +711,20 @@ pub fn media_path(db_path: &Path, media_id: i64) -> Result<MediaPath> {
         .with_context(|| format!("media {media_id} not found"))
 }
 
+pub fn mark_thumbnail_pending(db_path: &Path, media_id: i64) -> Result<()> {
+    let connection = open(db_path)?;
+    connection.execute(
+        "
+        UPDATE media
+        SET thumbnail_state = 'pending',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?1
+        ",
+        params![media_id],
+    )?;
+    Ok(())
+}
+
 pub fn reset_thumbnail_states(db_path: &Path) -> Result<()> {
     let connection = open(db_path)?;
     connection.execute(
@@ -778,6 +827,39 @@ mod tests {
 
         assert_eq!(version, 4);
         assert_eq!(present, 1);
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_migration_rolls_back_its_partial_schema() {
+        let (db_path, root) = temporary_catalog();
+        let mut connection = open(&db_path).unwrap();
+
+        let result = apply_migration(
+            &mut connection,
+            "synthetic_failure",
+            "
+            CREATE TABLE should_rollback(id INTEGER PRIMARY KEY);
+            THIS IS NOT VALID SQL;
+            ",
+        );
+
+        assert!(result.is_err());
+
+        let exists: i64 = connection
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'should_rollback'
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 0);
+
         drop(connection);
         fs::remove_dir_all(root).unwrap();
     }
