@@ -6,7 +6,10 @@ use std::{
 use anyhow::{Context, Result};
 use image::{DynamicImage, GenericImageView, ImageDecoder, ImageFormat};
 
-use crate::db::{self, AppState};
+use crate::{
+    db::{self, AppState},
+    diagnostics,
+};
 
 const THUMBNAIL_EDGE: u32 = 512;
 
@@ -97,6 +100,11 @@ pub fn ensure_thumbnail(state: &AppState, media_id: i64) -> Result<String> {
             Ok(output.to_string_lossy().into_owned())
         }
         Err(error) => {
+            diagnostics::log(
+                state,
+                "WARN",
+                format!("thumbnail media_id={media_id} failed: {error}"),
+            );
             let _ = db::mark_thumbnail_failed(&state.db_path, media_id);
             Err(error)
         }
