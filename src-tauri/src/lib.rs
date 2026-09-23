@@ -24,6 +24,19 @@ fn health() -> &'static str {
 }
 
 #[tauri::command]
+fn get_ui_preferences(state: State<'_, AppState>) -> Result<models::UiPreferences, String> {
+    db::get_ui_preferences(&state.db_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_ui_preferences(
+    preferences: models::UiPreferences,
+    state: State<'_, AppState>,
+) -> Result<models::UiPreferences, String> {
+    db::save_ui_preferences(&state.db_path, preferences).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, String> {
     db::refresh_source_availability(&state.db_path).map_err(|error| error.to_string())?;
     db::list_sources(&state.db_path).map_err(|error| error.to_string())
@@ -231,6 +244,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
             let cache_dir = app.path().app_cache_dir()?;
@@ -254,6 +268,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             health,
+            get_ui_preferences,
+            save_ui_preferences,
             list_sources,
             add_source,
             start_scan,
