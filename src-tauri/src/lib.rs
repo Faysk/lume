@@ -344,6 +344,7 @@ pub fn run() {
 
             let state = AppState::new(data_dir.join("library.db"), cache_dir);
             db::init_database(&state.db_path)?;
+            db::recover_interrupted_scans(&state.db_path)?;
             db::refresh_source_availability(&state.db_path)?;
 
             for source in db::list_sources(&state.db_path)? {
