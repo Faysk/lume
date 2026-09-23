@@ -13,6 +13,7 @@ use walkdir::WalkDir;
 
 use crate::{
     db::{self, AppState, DiscoveredMedia},
+    diagnostics,
     models::ScanProgress,
 };
 
@@ -77,6 +78,11 @@ pub fn run_scan(
 
     if !root.is_dir() {
         db::mark_source_offline(&state.db_path, source_id)?;
+        diagnostics::log(
+            &state,
+            "WARN",
+            format!("scan source_id={source_id} source unavailable"),
+        );
         emit_progress(
             &app,
             ScanProgress {
@@ -93,6 +99,11 @@ pub fn run_scan(
     }
 
     let generation = db::mark_scan_started(&state.db_path, source_id)?;
+    diagnostics::log(
+        &state,
+        "INFO",
+        format!("scan source_id={source_id} generation={generation} started"),
+    );
 
     let mut discovered = 0_u64;
     let mut supported = 0_u64;
@@ -266,6 +277,13 @@ pub fn run_scan(
 
     if errors > 0 {
         db::mark_scan_partial(&state.db_path, source_id)?;
+        diagnostics::log(
+            &state,
+            "WARN",
+            format!(
+                "scan source_id={source_id} completed partially; discovered={discovered} supported={supported} errors={errors}"
+            ),
+        );
         emit_progress(
             &app,
             ScanProgress {
@@ -285,6 +303,13 @@ pub fn run_scan(
     }
 
     db::finish_scan_and_reconcile(&state.db_path, source_id, generation)?;
+    diagnostics::log(
+        &state,
+        "INFO",
+        format!(
+            "scan source_id={source_id} completed; discovered={discovered} supported={supported}"
+        ),
+    );
 
     emit_progress(
         &app,
