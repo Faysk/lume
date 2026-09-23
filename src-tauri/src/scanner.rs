@@ -146,3 +146,24 @@ pub fn run_scan(app: AppHandle, state: AppState, source_id: i64) -> Result<()> {
 
     Ok(())
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::media_type_for_extension;
+
+    #[test]
+    fn supported_extensions_are_intentionally_small_for_v01() {
+        for extension in ["jpg", "jpeg", "png", "webp", "gif"] {
+            assert_eq!(media_type_for_extension(extension), Some("image"));
+        }
+
+        for extension in ["mp4", "mov", "webm"] {
+            assert_eq!(media_type_for_extension(extension), Some("video"));
+        }
+
+        for extension in ["txt", "zip", "mkv", "exe", "raw"] {
+            assert_eq!(media_type_for_extension(extension), None);
+        }
+    }
+}
