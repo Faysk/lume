@@ -265,7 +265,12 @@ export function Viewer({
               <button
                 className="toolbar-ghost-button"
                 type="button"
-                onClick={() => void openMediaExternal(item.id)}
+                onClick={() =>
+                  void runAction(
+                    () => openMediaExternal(item.id),
+                    "Aberto no aplicativo padrão",
+                  )
+                }
               >
                 Tentar no aplicativo padrão
               </button>

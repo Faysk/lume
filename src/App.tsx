@@ -453,16 +453,21 @@ function App() {
     if (loadingMoreRef.current || items.length >= total) return [];
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    const version = requestVersion.current;
 
     try {
       const page = await queryMedia(buildQuery(items.length, PAGE_SIZE));
+      if (version !== requestVersion.current) return [];
+
       const known = new Set(items.map((item) => item.id));
       const appended = page.items.filter((item) => !known.has(item.id));
       setItems((current) => [...current, ...appended]);
       setTotal(page.total);
       return appended;
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (version === requestVersion.current) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
       return [];
     } finally {
       loadingMoreRef.current = false;

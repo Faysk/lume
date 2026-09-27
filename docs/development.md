@@ -34,6 +34,23 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+## Smoke test da 0.1 no Windows
+
+O teste de catálogo grande usa um banco temporário e isolado; ele não lê nem altera
+arquivos pessoais:
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml catalog_250k_fixture_stays_paginated -- --ignored --nocapture
+```
+
+Para validar a experiência desktop, inicie `npm run tauri:dev` e adicione uma pasta de
+teste com imagens JPEG/PNG/WebP/GIF, vídeos MP4/WebM e pelo menos um arquivo não
+suportado. Confirme que os resultados aparecem durante a varredura, que a grade e a
+lista rolam, que filtros e ordenação funcionam, que imagens abrem e que vídeos
+reproduzíveis oferecem controles nativos. Navegue com as setas, feche com Esc, reinicie
+o aplicativo e confirme que fontes, catálogo e thumbnails existentes reaparecem sem
+iniciar uma nova varredura. Essa verificação manual não depende do acervo pessoal.
+
 ## Dados locais
 
 Em desenvolvimento e produção, o Lume usa os diretórios de dados/cache fornecidos pelo Tauri para o aplicativo.

@@ -8,7 +8,7 @@ O produto nasce de uma regra simples: **resolver muito bem o problema principal 
 
 ## Estado
 
-🚧 **Fundação concluída; implementação da 0.1 é o próximo marco.**
+🚧 **A implementação funcional da 0.1 está no repositório; a validação final no Windows continua pendente.**
 
 O backlog está planejado em GitHub Issues da **0.1 até a 1.0**:
 
